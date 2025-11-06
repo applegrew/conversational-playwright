@@ -111,17 +111,32 @@ npm run dev
 
 ## Configuration
 
-You can customize the MCP server configuration in `.env`:
-```
-MCP_SERVER_PATH=npx
-MCP_SERVER_ARGS=@playwright/mcp@latest,--headless
+You can customize the application behavior in `.env`:
+
+### MCP Server Configuration
+```bash
+MCP_SERVER_PORT=3000  # Port for MCP server (default: 3000)
 ```
 
-You can add additional arguments from the [@playwright/mcp options](https://github.com/microsoft/playwright/tree/main/packages/playwright-mcp#configuration):
+The MCP server runs with SSE (Server-Sent Events) transport on HTTP. You can modify the startup arguments in `src/services/mcpService.js` to add [@playwright/mcp options](https://github.com/microsoft/playwright/tree/main/packages/playwright-mcp#configuration):
 - `--browser chrome` - Use Chrome instead of Chromium
 - `--viewport-size 1920x1080` - Set custom viewport size
 - `--user-agent "Custom UA"` - Set custom user agent
 - `--timeout-action 10000` - Set action timeout (default 5000ms)
+
+### Logging Configuration
+```bash
+LOG_LEVEL=INFO  # Options: ERROR, WARN, INFO, DEBUG, VERBOSE
+```
+
+**Log Levels:**
+- `ERROR` - Only errors
+- `WARN` - Warnings and errors
+- `INFO` - Important info + LLM tool calls (default, no streaming spam)
+- `DEBUG` - Debug info + above
+- `VERBOSE` - Everything including 15 FPS screenshot streaming
+
+**Note:** Screenshot streaming logs (15 FPS) only appear at VERBOSE level to prevent log spam, but LLM-invoked screenshots always log at INFO level.
 
 ## Troubleshooting
 
@@ -135,15 +150,29 @@ You can add additional arguments from the [@playwright/mcp options](https://gith
 - Make sure your `.env` file contains `LLM_PROVIDER=gemini` and a valid `GEMINI_API_KEY`
 - Get your API key from [Google AI Studio](https://aistudio.google.com/app/apikey)
 
+### Rate Limit Errors
+- If you see "429 Too Many Requests", you've exceeded your API quota
+- Click the **↻ Retry** button after waiting the suggested time
+- For Gemini free tier: 50 requests per day per model
+- Consider upgrading your API plan for higher limits
+
 ### MCP Connection Issues
-- Ensure `@playwright/mcp` is accessible (it will be auto-installed via npx)
+- The MCP server runs on port 3000 by default (configurable via `MCP_SERVER_PORT`)
+- First run may take 30-90 seconds as the server initializes
 - Check the console for MCP server logs
-- The first run may take longer as it downloads the Playwright browsers
+- If port 3000 is in use, the app will automatically kill the existing process
+- The app uses SSE (Server-Sent Events) transport over HTTP
 
 ### Screenshot Not Showing
-- Click "Start Stream" to begin capturing
+- Screenshot stream auto-starts when services are ready
 - Make sure the browser has navigated to a page first
-- Check that Playwright is properly initialized
+- Check that the MCP server is connected (status indicator shows "Connected")
+- Screenshot streaming runs at 15 FPS
+
+### Debugging
+- Set `LOG_LEVEL=DEBUG` or `LOG_LEVEL=VERBOSE` in `.env` for detailed logs
+- Open DevTools in development mode: `npm run dev`
+- Check both main process console and renderer console logs
 
 ## Technologies Used
 

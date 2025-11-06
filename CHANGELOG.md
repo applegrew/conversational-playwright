@@ -1,6 +1,59 @@
 # Changelog
 
-## Version 1.0.0 - Initial Release
+## Version 1.1.0 - Stability and UX Improvements (2025-11-06)
+
+### Major Improvements
+
+#### MCP Server Connection
+- ✅ **Fixed MCP server connection** - Now uses SSE (Server-Sent Events) transport over HTTP
+- ✅ **HTTP endpoint detection** - Actively polls server endpoint to detect readiness
+- ✅ **Port conflict resolution** - Automatically kills existing processes on port 3000
+- ✅ **Proper cleanup** - Server process cleanup on app exit and force-quit
+- ✅ **Configurable port** - Set `MCP_SERVER_PORT` in `.env`
+
+#### Logging System
+- ✅ **Configurable log levels** - 5 levels: ERROR, WARN, INFO, DEBUG, VERBOSE
+- ✅ **Smart log filtering** - Screenshot streaming (15 FPS) only logs at VERBOSE level
+- ✅ **Reduced noise** - LLM tool calls log at INFO, streaming at VERBOSE
+- ✅ **Environment control** - Set `LOG_LEVEL` in `.env`
+- ✅ **Logger utility** - Centralized logging via `src/utils/logger.js`
+
+#### Error Handling
+- ✅ **User-friendly error messages** - No more raw JSON dumps in chat
+- ✅ **Retry button** - Click ↻ Retry to resend failed messages
+- ✅ **Error parsing** - Extracts status codes (429, 401, etc.) from errors
+- ✅ **Beautiful error UI** - Red-tinted messages with clear formatting
+- ✅ **Rate limit guidance** - Helpful messages for API quota errors
+
+#### Service Initialization
+- ✅ **Race condition fix** - Renderer waits for services-ready event
+- ✅ **Proper sequencing** - Services initialize before UI tries to use them
+- ✅ **Status indicator** - Shows "Connected" only when LLM service is ready
+- ✅ **Auto-start stream** - Screenshot stream starts automatically when ready
+
+#### Gemini API Fixes
+- ✅ **Schema cleaning** - Filters unsupported JSON Schema fields for Gemini
+- ✅ **Function response format** - Correct format: `{ functionResponse: { name, response } }`
+- ✅ **Function calls extraction** - Fixed getter function call
+- ✅ **System prompt handling** - Prepends to first message instead of using systemInstruction
+
+### Bug Fixes
+- 🐛 Fixed error messages being returned as successful responses
+- 🐛 Fixed retry button calling wrong function name
+- 🐛 Fixed status showing "Connected" before services ready
+- 🐛 Fixed screenshot service race condition
+- 🐛 Fixed MCP server port conflicts on restart
+- 🐛 Fixed DevTools opening in production mode
+
+### Technical Changes
+- Changed from StdioClientTransport to SSEClientTransport
+- Added HTTP endpoint polling for server readiness detection
+- Added signal handlers (SIGINT, SIGTERM) for cleanup
+- LLM service now throws errors instead of returning error strings
+- Added error object with status/statusText to IPC responses
+- Improved error parsing in renderer with regex extraction
+
+## Version 1.0.0 - Initial Release (2025-11-05)
 
 ### Features
 
