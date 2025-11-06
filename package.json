@@ -1,0 +1,30 @@
+{
+  "name": "conversational-playwright",
+  "version": "1.0.0",
+  "description": "ElectronJS app with conversational AI and Playwright MCP integration",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "keywords": [
+    "electron",
+    "playwright",
+    "mcp",
+    "ai",
+    "automation"
+  ],
+  "author": "Nirupam Biswas",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "@google/generative-ai": "^0.24.0",
+    "@modelcontextprotocol/sdk": "^1.21.0",
+    "@playwright/mcp": "latest",
+    "dotenv": "^17.2.3",
+    "electron": "^39.1.0"
+  },
+  "devDependencies": {
+    "electron-builder": "^26.0.12"
+  }
+}

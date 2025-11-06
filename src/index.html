@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversational Playwright</title>
+    <link rel="stylesheet" href="styles.css">
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';" />
+</head>
+<body>
+    <div class="container">
+        <!-- Chat Interface (Left Side) -->
+        <div class="chat-panel">
+            <div class="chat-header">
+                <div class="header-left">
+                    <h2>Conversational AI</h2>
+                    <span class="llm-badge" id="llmBadge">-</span>
+                </div>
+                <div class="status-indicator">
+                    <span class="status-dot" id="statusDot"></span>
+                    <span id="statusText">Initializing...</span>
+                </div>
+            </div>
+            
+            <div class="chat-messages" id="chatMessages">
+                <div class="welcome-message">
+                    <h3>Welcome to Conversational Playwright!</h3>
+                    <p>I can help you automate browser tasks using natural language. Try commands like:</p>
+                    <ul>
+                        <li>"Navigate to google.com"</li>
+                        <li>"Click on the search button"</li>
+                        <li>"Take a screenshot"</li>
+                        <li>"Fill in the form with test data"</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="chat-input-container">
+                <textarea 
+                    id="chatInput" 
+                    placeholder="Type your instruction here..."
+                    rows="3"
+                ></textarea>
+                <button id="sendButton" class="send-button">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    Send
+                </button>
+            </div>
+        </div>
+
+        <!-- Canvas/Screenshot Area (Right Side) -->
+        <div class="canvas-panel">
+            <div class="canvas-header">
+                <h2>Browser View</h2>
+                <div class="canvas-controls">
+                    <span class="fps-counter" id="fpsCounter">0 FPS</span>
+                </div>
+            </div>
+            
+            <div class="canvas-content" id="canvasContent">
+                <div class="canvas-placeholder">
+                    <svg width="120" height="120" viewBox="0 0 24 24" fill="none">
+                        <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
+                        <path d="M3 9H21" stroke="currentColor" stroke-width="2"/>
+                        <path d="M9 21V9" stroke="currentColor" stroke-width="2"/>
+                    </svg>
+                    <p>Browser view will appear here</p>
+                    <p class="hint">Stream will start automatically</p>
+                </div>
+                <img id="screenshotImage" class="screenshot-image" style="display: none;" />
+            </div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>
