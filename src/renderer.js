@@ -29,7 +29,6 @@ async function initializeApp() {
         console.log('[Renderer] Checking MCP tools...');
         const result = await window.electronAPI.getMCPTools();
         if (result.success) {
-            updateStatus('connected', 'Connected');
             console.log('[Renderer] Available MCP tools:', result.tools.length);
             
             // Wait for services to be ready before getting provider and starting screenshot stream
@@ -46,6 +45,9 @@ async function initializeApp() {
                         llmBadge.classList.add('gemini');
                     }
                     console.log('[Renderer] Using LLM provider:', provider);
+                    
+                    // Now that LLM service is ready, update status to Connected
+                    updateStatus('connected', 'Connected');
                 }
                 
                 // Auto-start screenshot stream
@@ -171,6 +173,10 @@ function addMessage(role, content) {
 }
 
 function addErrorMessage(errorInfo, originalMessage) {
+    console.log('[addErrorMessage] Called with:', errorInfo);
+    console.log('[addErrorMessage] Error type:', typeof errorInfo);
+    console.log('[addErrorMessage] Error keys:', errorInfo ? Object.keys(errorInfo) : 'null');
+    
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message message-assistant message-error';
     
@@ -186,16 +192,47 @@ function addErrorMessage(errorInfo, originalMessage) {
     let errorMessage = 'An error occurred';
     
     if (typeof errorInfo === 'object' && errorInfo !== null) {
+        // Handle errors with status code
         if (errorInfo.status && errorInfo.statusText) {
             statusText = `${errorInfo.status} ${errorInfo.statusText}`;
             errorMessage = errorInfo.statusText;
+            
+            // Add more context from message if available
+            if (errorInfo.message && errorInfo.message !== errorInfo.statusText) {
+                // Extract meaningful part from error message
+                const msg = errorInfo.message;
+                if (msg.includes('429')) {
+                    errorMessage = 'Rate limit exceeded. Please wait a moment before retrying.';
+                } else if (msg.includes('quota')) {
+                    errorMessage = 'API quota exceeded. Please check your usage limits.';
+                } else {
+                    errorMessage = errorInfo.statusText;
+                }
+            }
         } else if (errorInfo.message) {
+            // Handle errors with just a message
             errorMessage = errorInfo.message;
-        } else if (typeof errorInfo === 'string') {
-            errorMessage = errorInfo;
+            
+            // Try to extract status from message
+            const statusMatch = errorMessage.match(/(\d{3})\s+([A-Za-z\s]+)/);
+            if (statusMatch) {
+                statusText = `${statusMatch[1]} ${statusMatch[2]}`;
+                // Clean up the error message
+                if (errorMessage.includes('429')) {
+                    errorMessage = 'Rate limit exceeded. Please wait before retrying.';
+                } else if (errorMessage.includes('quota')) {
+                    errorMessage = 'API quota exceeded. Check your usage limits.';
+                }
+            }
         }
     } else if (typeof errorInfo === 'string') {
         errorMessage = errorInfo;
+        
+        // Try to extract status from string
+        const statusMatch = errorMessage.match(/(\d{3})\s+([A-Za-z\s]+)/);
+        if (statusMatch) {
+            statusText = `${statusMatch[1]} ${statusMatch[2]}`;
+        }
     }
     
     errorText.innerHTML = `<strong>${statusText}</strong><br>${errorMessage}`;
@@ -211,7 +248,7 @@ function addErrorMessage(errorInfo, originalMessage) {
         // Resend the original message
         if (originalMessage) {
             chatInput.value = originalMessage;
-            sendMessage();
+            handleSendMessage();
         }
     };
     contentDiv.appendChild(retryButton);

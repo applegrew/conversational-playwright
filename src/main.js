@@ -125,7 +125,13 @@ ipcMain.handle('send-message', async (event, message) => {
     return { success: true, response };
   } catch (error) {
     console.error('Error processing message:', error);
-    return { success: false, error: error.message };
+    // Return full error object with status info for proper formatting in UI
+    const errorInfo = {
+      message: error.message || 'An error occurred',
+      status: error.status,
+      statusText: error.statusText
+    };
+    return { success: false, error: errorInfo };
   }
 });
 

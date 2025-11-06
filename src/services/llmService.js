@@ -149,13 +149,17 @@ Always respond in a helpful and friendly manner.`;
 
       return textContent || 'I executed the requested action.';
     } catch (error) {
-      console.error('Error processing message:', error);
+      console.error('Error processing message with Claude:', error);
       
       if (error.message && error.message.includes('API key')) {
-        return 'Error: Please set your ANTHROPIC_API_KEY in the .env file.';
+        const apiKeyError = new Error('Please set your ANTHROPIC_API_KEY in the .env file.');
+        apiKeyError.status = 401;
+        apiKeyError.statusText = 'Unauthorized';
+        throw apiKeyError;
       }
       
-      return `Error: ${error.message}`;
+      // Re-throw the error to be handled by main.js
+      throw error;
     }
   }
 
@@ -315,10 +319,15 @@ Now, please handle this request by calling the appropriate tools:`;
       console.error('Error processing message with Gemini:', error);
       
       if (error.message && error.message.includes('API key')) {
-        return 'Error: Please set your GEMINI_API_KEY in the .env file.';
+        const apiKeyError = new Error('Please set your GEMINI_API_KEY in the .env file.');
+        apiKeyError.status = 401;
+        apiKeyError.statusText = 'Unauthorized';
+        throw apiKeyError;
       }
       
-      return `Error: ${error.message}`;
+      // Re-throw the error to be handled by main.js
+      // Gemini errors already have status and statusText properties
+      throw error;
     }
   }
 
