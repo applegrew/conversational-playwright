@@ -37,42 +37,51 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  createWindow();
-
-  // Initialize services - require them here to avoid loading issues
-  try {
-    const MCPService = require('./services/mcpService');
-    const LLMService = require('./services/llmService');
-    const ScreenshotService = require('./services/screenshotService');
-    
-    console.log('Creating MCP service...');
-    mcpService = new MCPService();
-    
-    console.log('Initializing MCP service...');
-    await mcpService.initialize();
-    console.log('MCP service initialized successfully');
-    
-    console.log('Creating LLM service...');
-    llmService = new LLMService(mcpService);
-    console.log('LLM service created');
-    
-    console.log('Creating Screenshot service...');
-    screenshotService = new ScreenshotService(mcpService);
-    console.log('Screenshot service created');
-    
-    console.log('All services initialized successfully');
-    
-    // Notify renderer that services are ready
-    if (mainWindow && mainWindow.webContents) {
-      mainWindow.webContents.send('services-ready');
-      console.log('Sent services-ready event to renderer');
+  // Start window creation and service initialization in parallel
+  // They don't depend on each other, so this speeds up startup
+  console.log('Starting parallel initialization...');
+  
+  const windowCreation = Promise.resolve(createWindow());
+  
+  const serviceInitialization = (async () => {
+    try {
+      const MCPService = require('./services/mcpService');
+      const LLMService = require('./services/llmService');
+      const ScreenshotService = require('./services/screenshotService');
+      
+      console.log('Creating MCP service...');
+      mcpService = new MCPService();
+      
+      console.log('Initializing MCP service...');
+      await mcpService.initialize();
+      console.log('MCP service initialized successfully');
+      
+      console.log('Creating LLM service...');
+      llmService = new LLMService(mcpService);
+      console.log('LLM service created');
+      
+      console.log('Creating Screenshot service...');
+      screenshotService = new ScreenshotService(mcpService);
+      console.log('Screenshot service created');
+      
+      console.log('All services initialized successfully');
+    } catch (error) {
+      console.error('Error initializing services:', error);
+      console.error('Stack trace:', error.stack);
+      // Show error dialog to user
+      const { dialog } = require('electron/main');
+      dialog.showErrorBox('Initialization Error', `Failed to initialize services: ${error.message}`);
+      throw error;
     }
-  } catch (error) {
-    console.error('Error initializing services:', error);
-    console.error('Stack trace:', error.stack);
-    // Show error dialog to user
-    const { dialog } = require('electron/main');
-    dialog.showErrorBox('Initialization Error', `Failed to initialize services: ${error.message}`);
+  })();
+  
+  // Wait for both to complete
+  await Promise.all([windowCreation, serviceInitialization]);
+  
+  // Notify renderer that services are ready
+  if (mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send('services-ready');
+    console.log('Sent services-ready event to renderer');
   }
 
   app.on('activate', () => {

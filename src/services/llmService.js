@@ -12,7 +12,7 @@ class LLMService {
     if (this.provider === 'gemini') {
       this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
       this.model = this.genAI.getGenerativeModel({ 
-        model: 'gemini-2.0-flash-exp',
+        model: process.env.GEMINI_MODEL,
         generationConfig: {
           temperature: 1,
           topP: 0.95,
@@ -310,8 +310,22 @@ Now, please handle this request by calling the appropriate tools:`;
       this.conversationHistory = await chat.getHistory();
       
       // Keep conversation history manageable (last 20 messages)
+      // But ensure we always start with a user message (Gemini requirement)
       if (this.conversationHistory.length > 20) {
-        this.conversationHistory = this.conversationHistory.slice(-20);
+        let slicedHistory = this.conversationHistory.slice(-20);
+        
+        // Find the first user message in the sliced history
+        const firstUserIndex = slicedHistory.findIndex(msg => msg.role === 'user');
+        
+        if (firstUserIndex > 0) {
+          // If history doesn't start with user message, slice from first user message
+          slicedHistory = slicedHistory.slice(firstUserIndex);
+        } else if (firstUserIndex === -1) {
+          // If no user message found, clear history (shouldn't happen but be safe)
+          slicedHistory = [];
+        }
+        
+        this.conversationHistory = slicedHistory;
       }
 
       return textContent || 'I executed the requested action.';
