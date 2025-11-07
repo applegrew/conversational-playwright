@@ -90,13 +90,18 @@ async function handleSendMessage() {
     const message = chatInput.value.trim();
     if (!message) return;
     
-    // Disable input while processing
-    chatInput.disabled = true;
-    sendButton.disabled = true;
-    
     // Add user message to chat
     addMessage('user', message);
     chatInput.value = '';
+    
+    // Send to backend
+    await sendMessageToBackend(message);
+}
+
+async function sendMessageToBackend(message) {
+    // Disable input while processing
+    chatInput.disabled = true;
+    sendButton.disabled = true;
     
     // Show loading indicator
     const loadingId = addLoadingMessage();
@@ -173,10 +178,6 @@ function addMessage(role, content) {
 }
 
 function addErrorMessage(errorInfo, originalMessage) {
-    console.log('[addErrorMessage] Called with:', errorInfo);
-    console.log('[addErrorMessage] Error type:', typeof errorInfo);
-    console.log('[addErrorMessage] Error keys:', errorInfo ? Object.keys(errorInfo) : 'null');
-    
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message message-assistant message-error';
     
@@ -245,10 +246,9 @@ function addErrorMessage(errorInfo, originalMessage) {
     retryButton.onclick = () => {
         // Remove error message
         messageDiv.remove();
-        // Resend the original message
+        // Resend the original message without adding it to UI again
         if (originalMessage) {
-            chatInput.value = originalMessage;
-            handleSendMessage();
+            sendMessageToBackend(originalMessage);
         }
     };
     contentDiv.appendChild(retryButton);
