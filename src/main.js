@@ -78,10 +78,20 @@ app.whenReady().then(async () => {
   // Wait for both to complete
   await Promise.all([windowCreation, serviceInitialization]);
   
-  // Notify renderer that services are ready
+  // Wait for renderer to be ready before sending services-ready event
   if (mainWindow && mainWindow.webContents) {
-    mainWindow.webContents.send('services-ready');
-    console.log('Sent services-ready event to renderer');
+    // Check if page has already loaded
+    if (mainWindow.webContents.isLoading()) {
+      // Wait for page to finish loading
+      mainWindow.webContents.once('did-finish-load', () => {
+        mainWindow.webContents.send('services-ready');
+        console.log('Sent services-ready event to renderer (after page load)');
+      });
+    } else {
+      // Page already loaded, send immediately
+      mainWindow.webContents.send('services-ready');
+      console.log('Sent services-ready event to renderer (page already loaded)');
+    }
   }
 
   app.on('activate', () => {

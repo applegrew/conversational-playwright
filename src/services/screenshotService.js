@@ -6,6 +6,9 @@ class ScreenshotService {
     this.callback = null;
     this.targetFPS = 15;
     this.frameInterval = 1000 / this.targetFPS; // ~67ms for 15 FPS
+    this.consecutiveErrors = 0;
+    this.maxConsecutiveErrors = 5;
+    this.isPaused = false;
   }
 
   start(callback) {
@@ -21,13 +24,35 @@ class ScreenshotService {
     
     // Capture screenshots at the specified FPS
     this.intervalId = setInterval(async () => {
+      // Skip if paused
+      if (this.isPaused) {
+        return;
+      }
+      
       try {
         const screenshot = await this.mcpService.takeScreenshot();
         if (screenshot && this.callback) {
           this.callback(screenshot);
+          // Reset error counter on success
+          this.consecutiveErrors = 0;
         }
       } catch (error) {
-        console.error('Error capturing screenshot:', error);
+        this.consecutiveErrors++;
+        console.error(`Error capturing screenshot (${this.consecutiveErrors}/${this.maxConsecutiveErrors}):`, error.message);
+        
+        // If too many consecutive errors, pause the screenshot stream
+        if (this.consecutiveErrors >= this.maxConsecutiveErrors) {
+          console.warn(`Too many consecutive screenshot errors (${this.maxConsecutiveErrors}), pausing screenshot stream...`);
+          this.pause();
+          
+          // Try to resume after 10 seconds
+          setTimeout(() => {
+            if (this.isRunning && this.isPaused) {
+              console.log('Attempting to resume screenshot stream...');
+              this.resume();
+            }
+          }, 10000);
+        }
       }
     }, this.frameInterval);
   }
@@ -65,8 +90,23 @@ class ScreenshotService {
     }
   }
 
+  pause() {
+    if (!this.isPaused) {
+      console.log('Pausing screenshot capture');
+      this.isPaused = true;
+    }
+  }
+  
+  resume() {
+    if (this.isPaused) {
+      console.log('Resuming screenshot capture');
+      this.isPaused = false;
+      this.consecutiveErrors = 0;
+    }
+  }
+  
   isActive() {
-    return this.isRunning;
+    return this.isRunning && !this.isPaused;
   }
 }
 
