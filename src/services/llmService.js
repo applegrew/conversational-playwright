@@ -5,7 +5,7 @@ require('dotenv').config();
 class LLMService {
   constructor(mcpService) {
     this.mcpService = mcpService;
-    this.provider = process.env.LLM_PROVIDER || 'claude';
+    this.provider = process.env.LLM_PROVIDER || 'gemini';
     this.conversationHistory = [];
     
     // Initialize the appropriate LLM client
@@ -14,7 +14,7 @@ class LLMService {
       this.model = this.genAI.getGenerativeModel({ 
         model: process.env.GEMINI_MODEL,
         generationConfig: {
-          temperature: 1,
+          temperature: 0,
           topP: 0.95,
           topK: 40,
           maxOutputTokens: 8192,
@@ -62,7 +62,7 @@ class LLMService {
       }));
 
       // Create system prompt
-      const systemPrompt = `You are a helpful AI assistant that can control a web browser using Playwright.
+      const systemPrompt = `You are a helpful AI assistant that can control a web browser using Playwright tools.
 You have access to various browser automation tools through the Model Context Protocol (MCP).
 
 Available tools:
@@ -280,18 +280,70 @@ Now, please handle this request by calling the appropriate tools:`;
               functionCall.args || {}
             );
             
-            functionResponses.push({
-              functionResponse: {
-                name: functionCall.name,
-                response: toolResult
+            // Check if this is a navigation-related "error" that's actually success
+            let isNavigationSuccess = false;
+            if (toolResult.isError && toolResult.content && toolResult.content.length > 0) {
+              const errorText = toolResult.content[0].text || '';
+              if (errorText.includes('Execution context was destroyed') ||
+                  errorText.includes('most likely because of a navigation')) {
+                isNavigationSuccess = true;
+                console.log('Detected successful navigation (context destroyed)');
               }
-            });
+            }
+            
+            // If it's a navigation success, get fresh snapshot automatically
+            if (isNavigationSuccess) {
+              console.log('Getting fresh snapshot after navigation...');
+              try {
+                // Wait a bit for page to load
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                const snapshotResult = await this.mcpService.callTool('browser_snapshot', {});
+                
+                // Send the snapshot as the response instead of the error
+                functionResponses.push({
+                  functionResponse: {
+                    name: functionCall.name,
+                    response: {
+                      content: [
+                        {
+                          type: 'text',
+                          text: `### Result\nSuccessfully executed ${functionCall.name}. Page navigated.\n\n${snapshotResult.content[0].text}`
+                        }
+                      ]
+                    }
+                  }
+                });
+              } catch (snapshotError) {
+                console.error('Error getting snapshot after navigation:', snapshotError);
+                // Fall back to original result
+                functionResponses.push({
+                  functionResponse: {
+                    name: functionCall.name,
+                    response: toolResult
+                  }
+                });
+              }
+            } else {
+              // Normal result (success or actual error)
+              functionResponses.push({
+                functionResponse: {
+                  name: functionCall.name,
+                  response: toolResult
+                }
+              });
+            }
           } catch (error) {
             console.error(`Error executing tool ${functionCall.name}:`, error);
             functionResponses.push({
               functionResponse: {
                 name: functionCall.name,
-                response: { error: error.message }
+                response: { 
+                  content: [{
+                    type: 'text',
+                    text: `### Result\nError: ${error.message}`
+                  }],
+                  isError: true
+                }
               }
             });
           }

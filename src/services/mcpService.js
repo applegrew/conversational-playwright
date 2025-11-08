@@ -147,6 +147,13 @@ class MCPService {
     try {
       const isStreaming = options.isStreaming || false;
       
+      // Check if client is available (might be null during reconnection)
+      if (!this.client) {
+        const error = new Error('MCP client not available (reconnecting or not initialized)');
+        error.code = 'CLIENT_NOT_AVAILABLE';
+        throw error;
+      }
+      
       // For screenshot calls from streaming service, only log at verbose level
       if (toolName === 'browser_take_screenshot' && isStreaming) {
         logger.verbose(`Calling tool: ${toolName} (streaming)`);

@@ -37,6 +37,13 @@ class ScreenshotService {
           this.consecutiveErrors = 0;
         }
       } catch (error) {
+        // Special handling for client not available (during reconnection)
+        if (error.code === 'CLIENT_NOT_AVAILABLE') {
+          // Don't count as consecutive error, just skip this frame
+          // Client will be available again after reconnection completes
+          return;
+        }
+        
         this.consecutiveErrors++;
         console.error(`Error capturing screenshot (${this.consecutiveErrors}/${this.maxConsecutiveErrors}):`, error.message);
         
