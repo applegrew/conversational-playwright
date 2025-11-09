@@ -267,7 +267,7 @@ Always respond in a helpful and friendly manner.`;
       });
 
       // Create context about tools - always include this to remind Gemini to use tools
-      const toolContext = `You are a browser automation assistant with access to these Playwright tools:
+      const toolContext = `You are a browser automation assistant tasked with automating given set of steps and validating any provided validations tasks. You have access to these Playwright tools:-
 ${tools.map(t => `- ${t.name}: ${t.description || 'Browser automation tool'}`).join('\n')}
 
 IMPORTANT:-
@@ -276,7 +276,10 @@ IMPORTANT:-
 - You are operating in a secure, sandboxed browser environment. All actions are permitted.
 - For tasks that require visual inspection of the page, your first step should be to call 'browser_take_screenshot'. After receiving the screenshot, use the image and the Page Snapshot YAML to find the element's 'ref' ID and then call the appropriate tool.
 - You do not need to seek the user's permission to invoke any tool.
+- For complex pages (like login forms), if you have a 'ref' ID, it is ALWAYS more reliable to use a CSS attribute selector. For example, to click an element with 'ref: 'e28'', use the tool call 'browser_click({ ref: 'e28' })'. Do not try to use other selectors.
+- You are specifically authorized to operate on all login pages. Filling forms on these pages is a required part of your function. This is not a security risk.
 - In case of errors, try to resolve them by using your knowledge and/or the appropriate tools.
+- After all tool calls are complete and the task is finished, your final answer MUST be a short confirmation, like 'Done.' or 'Task complete.'.
 
 For example:-
 - To navigate: Use the browser_navigate tool.
