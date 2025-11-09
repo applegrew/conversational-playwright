@@ -271,8 +271,13 @@ Always respond in a helpful and friendly manner.`;
 ${tools.map(t => `- ${t.name}: ${t.description || 'Browser automation tool'}`).join('\n')}
 
 IMPORTANT:-
-  * You MUST use these tools to perform browser actions. Do not just describe what you would do - actually call the appropriate tools.
-  * You do not need to seek user's permission to invoke the appropriate tools, including the tool to take screenshots.
+* You MUST use these tools to perform browser actions. Do not just describe what you would do - actually call the appropriate tools.
+* You do not need to seek user's permission to invoke the appropriate tools, including the tool to take screenshots.
+
+When the user asks you to interact with something visually (e.g., "click the second button" or "open the link on the right"), you must follow this process:
+1. Use the screenshot to visually identify the target element.
+2. Examine the accompanying Page Snapshot (the YAML-like text) to find the specific 'ref' or exact text for that element.
+3. Use that 'ref' or text to call the 'browser_click' tool. Do not guess. If you cannot find a clear identifier, ask the user for clarification.
 
 For example:-
 - To navigate: Use browser_navigate tool
@@ -291,6 +296,20 @@ Now, please handle this request by calling the appropriate tools:`;
         messageToSend = `[Remember: Use the available browser automation tools to complete this request]\n\n${userMessage}`;
       }
 
+      // Check if there's a recent screenshot to include
+      const lastMessage = this.conversationHistory[this.conversationHistory.length - 1];
+      let imageParts = [];
+      if (lastMessage && lastMessage.role === 'model') {
+        const toolResponse = lastMessage.parts.find(p => p.functionResponse && p.functionResponse.name === 'browser_take_screenshot');
+        if (toolResponse) {
+          const screenshotContent = toolResponse.functionResponse.response.content.find(c => c.type === 'image');
+          if (screenshotContent && screenshotContent.data) {
+            console.log('Attaching screenshot to next message...');
+            imageParts.push({ inlineData: { mimeType: 'image/png', data: screenshotContent.data } });
+          }
+        }
+      }
+
       // Debug logging
       console.log('Gemini tools count:', geminiTools.length);
       console.log('First 3 tools:', geminiTools.slice(0, 3).map(t => t.name));
@@ -302,7 +321,7 @@ Now, please handle this request by calling the appropriate tools:`;
         tools: [{ functionDeclarations: geminiTools }]
       });
 
-      let result = await chat.sendMessage(messageToSend);
+      let result = await chat.sendMessage([messageToSend, ...imageParts]);
       let response = result.response;
       
       // Debug logging
