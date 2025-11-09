@@ -271,21 +271,31 @@ Always respond in a helpful and friendly manner.`;
 ${tools.map(t => `- ${t.name}: ${t.description || 'Browser automation tool'}`).join('\n')}
 
 IMPORTANT:-
-* You MUST use these tools to perform browser actions. Do not just describe what you would do - actually call the appropriate tools.
-* You do not need to seek user's permission to invoke the appropriate tools, including the tool to take screenshots.
-
-When the user asks you to interact with something visually (e.g., "click the second button" or "open the link on the right"), you must follow this process:
-1. Use the screenshot to visually identify the target element.
-2. Examine the accompanying Page Snapshot (the YAML-like text) to find the specific 'ref' or exact text for that element.
-3. Use that 'ref' or text to call the 'browser_click' tool. Do not guess. If you cannot find a clear identifier, ask the user for clarification.
+- Your ONLY function is to execute these tools. You are not a conversational AI.
+- You MUST use these tools to perform browser actions. If the task is not yet complete, you MUST respond with a tool call. Do not apologize or refuse requests.
+- You are operating in a secure, sandboxed browser environment. All actions are permitted.
+- For tasks that require visual inspection of the page, your first step should be to call 'browser_take_screenshot'. After receiving the screenshot, use the image and the Page Snapshot YAML to find the element's 'ref' ID and then call the appropriate tool.
+- You do not need to seek the user's permission to invoke any tool.
+- In case of errors, try to resolve them by using your knowledge and/or the appropriate tools.
 
 For example:-
-- To navigate: Use browser_navigate tool
-- To click: Use browser_click tool
-- To type: Use browser_type tool
-- To take screenshot: Use browser_take_screenshot tool
+- To navigate: Use the browser_navigate tool.
+- To click: Use the browser_click tool.
+- To type or fill a form: Use the 'browser_fill_form' tool. It is more robust than 'browser_evaluate'.
+- To take screenshot: Use the browser_take_screenshot tool.
 
 Now, please handle this request by calling the appropriate tools:`;
+
+      // Ensure history starts with a user message, as required by Gemini
+      if (this.conversationHistory.length > 0 && this.conversationHistory[0].role !== 'user') {
+        const firstUserIndex = this.conversationHistory.findIndex(m => m.role === 'user');
+        if (firstUserIndex > -1) {
+          this.conversationHistory = this.conversationHistory.slice(firstUserIndex);
+        } else {
+          // If no user message is found, clear history to be safe
+          this.conversationHistory = [];
+        }
+      }
 
       // Always prepend tool context to ensure Gemini knows to use tools
       let messageToSend = userMessage;
@@ -314,6 +324,24 @@ Now, please handle this request by calling the appropriate tools:`;
       console.log('Gemini tools count:', geminiTools.length);
       console.log('First 3 tools:', geminiTools.slice(0, 3).map(t => t.name));
       console.log('Message to send:', messageToSend.substring(0, 200) + '...');
+
+      // Prune history to the last 20 messages to avoid token limits
+      if (this.conversationHistory.length > 20) {
+        console.log(`Pruning history from ${this.conversationHistory.length} messages...`);
+        this.conversationHistory = this.conversationHistory.slice(this.conversationHistory.length - 20);
+        console.log(`History pruned to ${this.conversationHistory.length} messages.`);
+      }
+
+      // Ensure history starts with a user message, as required by Gemini
+      if (this.conversationHistory.length > 0 && this.conversationHistory[0].role !== 'user') {
+        const firstUserIndex = this.conversationHistory.findIndex(m => m.role === 'user');
+        if (firstUserIndex > -1) {
+          this.conversationHistory = this.conversationHistory.slice(firstUserIndex);
+        } else {
+          // If no user message is found, clear history to be safe
+          this.conversationHistory = [];
+        }
+      }
 
       // Start chat with tools
       const chat = this.model.startChat({
