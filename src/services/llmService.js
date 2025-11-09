@@ -5,36 +5,48 @@ require('dotenv').config();
 class LLMService {
   constructor(mcpService) {
     this.mcpService = mcpService;
-    this.provider = process.env.LLM_PROVIDER || 'gemini';
+    this.provider = null;
     this.conversationHistory = [];
-    
-    // Initialize the appropriate LLM client
-    if (this.provider === 'gemini') {
-      this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      this.model = this.genAI.getGenerativeModel({ 
-        model: process.env.GEMINI_MODEL,
+    this.model = null; // For Gemini or Claude
+    this.anthropic = null; // For Claude
+  }
+
+  async initialize() {
+    if (process.env.GEMINI_API_KEY) {
+      this.provider = 'gemini';
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+      this.model = genAI.getGenerativeModel({ 
+        model: process.env.GEMINI_MODEL || 'gemini-pro',
         generationConfig: {
           temperature: 0,
-          topP: 0.95,
-          topK: 40,
-          maxOutputTokens: 8192,
-        }
+        },
+        safetySettings: [],
       });
       console.log('Using Gemini as LLM provider');
-    } else {
+    } else if (process.env.ANTHROPIC_API_KEY) {
+      this.provider = 'claude';
       this.anthropic = new Anthropic({
         apiKey: process.env.ANTHROPIC_API_KEY
       });
       console.log('Using Claude as LLM provider');
+    } else {
+      this.provider = 'none';
+      console.warn('No LLM provider API key found. Please set GEMINI_API_KEY or ANTHROPIC_API_KEY in .env');
     }
   }
 
   async processMessage(userMessage) {
     if (this.provider === 'gemini') {
       return await this.processMessageGemini(userMessage);
-    } else {
+    } else if (this.provider === 'claude') {
       return await this.processMessageClaude(userMessage);
+    } else {
+      throw new Error('No active LLM provider to process message. Please set GEMINI_API_KEY or ANTHROPIC_API_KEY in .env');
     }
+  }
+
+  async getLLMProvider() {
+    return { provider: this.provider };
   }
 
   async processMessageClaude(userMessage) {
@@ -258,9 +270,11 @@ Always respond in a helpful and friendly manner.`;
       const toolContext = `You are a browser automation assistant with access to these Playwright tools:
 ${tools.map(t => `- ${t.name}: ${t.description || 'Browser automation tool'}`).join('\n')}
 
-IMPORTANT: You MUST use these tools to perform browser actions. Do not just describe what you would do - actually call the appropriate tools.
+IMPORTANT:-
+  * You MUST use these tools to perform browser actions. Do not just describe what you would do - actually call the appropriate tools.
+  * You do not need to seek user's permission to invoke the appropriate tools, including the tool to take screenshots.
 
-For example:
+For example:-
 - To navigate: Use browser_navigate tool
 - To click: Use browser_click tool
 - To type: Use browser_type tool

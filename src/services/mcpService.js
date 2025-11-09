@@ -190,7 +190,10 @@ class MCPService {
       
       return result;
     } catch (error) {
-      console.error(`Error calling tool ${toolName}:`, error);
+      // Don't log client not available errors from streaming calls, they are expected during reconnect
+      if (!(isStreaming && error.code === 'CLIENT_NOT_AVAILABLE')) {
+        logger.error(`Error calling tool ${toolName}:`, error);
+      }
       
       // Track last failed call
       this.lastFailedCall = Date.now();
@@ -227,39 +230,31 @@ class MCPService {
 
   async takeScreenshot() {
     try {
-      // Use the browser_take_screenshot tool from @playwright/mcp
-      // Pass isStreaming flag to suppress logs at INFO level
-      const result = await this.callTool('browser_take_screenshot', {
-        type: 'png'
-      }, { isStreaming: true });
-      
-      logger.verbose('Screenshot result:', result ? 'received' : 'null');
-      if (result && result.content) {
-        logger.verbose('Screenshot content length:', result.content.length);
-        logger.verbose('Screenshot content types:', result.content.map(c => c.type));
-      }
-      
+      const result = await this.callTool('browser_take_screenshot', {}, { isStreaming: true });
+
+      // Added for diagnostics
+      logger.verbose('[takeScreenshot] Raw result:', JSON.stringify(result));
+
       if (result && result.content && result.content.length > 0) {
         // The screenshot is returned as base64 in the content
         for (const content of result.content) {
           if (content.type === 'image') {
-            logger.verbose('Found image content, data length:', content.data ? content.data.length : 0);
+            logger.verbose('[takeScreenshot] Found image data, length:', content.data ? content.data.length : 0);
             return content.data; // Base64 image data
-          } else if (content.type === 'text') {
-            // Try to extract base64 from text
-            const match = content.text.match(/data:image\/png;base64,(.+)/);
-            if (match) {
-              logger.verbose('Found base64 in text, length:', match[1].length);
-              return match[1];
-            }
           }
         }
       }
-      logger.verbose('No screenshot data found');
+      logger.verbose('[takeScreenshot] No image data found in result.');
       return null;
     } catch (error) {
-      console.error('Error taking screenshot:', error);
-      return null;
+      // If the client is not available (reconnecting), just re-throw without logging.
+      // The ScreenshotService is designed to handle this gracefully.
+      if (error.code === 'CLIENT_NOT_AVAILABLE') {
+        throw error;
+      }
+      // For other errors, log them as they might be important.
+      logger.error('Error taking screenshot:', error);
+      throw error;
     }
   }
 

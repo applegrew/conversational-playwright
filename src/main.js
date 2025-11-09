@@ -59,7 +59,8 @@ app.whenReady().then(async () => {
       
       console.log('Creating LLM service...');
       llmService = new LLMService(mcpService);
-      console.log('LLM service created');
+      await llmService.initialize(); // Initialize the LLM provider
+      console.log('LLM service initialized');
       
       console.log('Creating Screenshot service...');
       screenshotService = new ScreenshotService(mcpService);
