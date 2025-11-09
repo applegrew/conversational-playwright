@@ -1,21 +1,21 @@
 # Conversational Playwright
 
-An ElectronJS-based application that combines conversational AI with browser automation using Playwright MCP (Model Context Protocol). Control a headless Chrome browser through natural language instructions and see real-time screenshots at 15 FPS.
+A test automation application that combines conversational AI with browser automation using Playwright MCP (Model Context Protocol). Control a headless Chrome browser through natural language instructions and see the happening in real-time.
 
 ## Features
 
 - 🤖 **Conversational AI Interface**: Chat with an AI assistant to control browser automation
 - 🌐 **Playwright MCP Integration**: Uses official `@playwright/mcp` package for browser automation
-- 📸 **Real-time Screenshot Streaming**: View browser activity at 15 FPS in the canvas area
+- 📸 **Real-time Screenshot Streaming**: View browser activity in the canvas area
 - 🎨 **Modern UI**: Beautiful dark-themed interface with chat on the left and browser view on the right
-- ⚡ **Dual LLM Support**: Choose between Anthropic's Claude or Google's Gemini for intelligent command interpretation
+- ⚡ **Dual LLM Support**: Choose between Google's Gemini or Anthropic's Claude for intelligent command interpretation
 
 ## Prerequisites
 
 - Node.js 18+ and npm
 - API key for your chosen LLM provider:
-  - **Claude**: Get from [Anthropic Console](https://console.anthropic.com/)
   - **Gemini**: Get from [Google AI Studio](https://aistudio.google.com/app/apikey)
+  - **Claude**: Get from [Anthropic Console](https://console.anthropic.com/)
 
 ## Installation
 
@@ -37,13 +37,13 @@ cp .env.example .env
 
 4. Edit `.env` and configure your LLM provider:
 
-**For Claude (default):**
+**For Claude:**
 ```bash
 LLM_PROVIDER=claude
 ANTHROPIC_API_KEY=your_actual_api_key_here
 ```
 
-**For Gemini:**
+**For Gemini (default):**
 ```bash
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=your_actual_api_key_here
@@ -67,7 +67,6 @@ npm start
    - "Click on the search button"
    - "Type 'hello world' in the search box"
    - "Take a screenshot"
-   - "Scroll down the page"
 
 ## Architecture
 

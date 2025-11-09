@@ -29,7 +29,7 @@ class MCPService {
       
       // Start the MCP server manually with --port flag
       console.log(`Starting MCP server on port ${serverPort}...`);
-      this.serverProcess = spawn('npx', ['@playwright/mcp@latest', '--browser', 'chrome', '--headless', '--port', serverPort.toString()], {
+      this.serverProcess = spawn('npx', ['@playwright/mcp@latest', '--browser', 'chrome', '--caps', 'vision', '--headless', '--port', serverPort.toString()], {
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe']
       });
@@ -125,7 +125,7 @@ class MCPService {
       const toolsList = await this.client.listTools();
       const allTools = toolsList.tools || [];
       // Filter out the redundant browser_type tool to avoid confusion with browser_fill_form
-      this.tools = allTools.filter(tool => tool.name !== 'browser_type');
+      this.tools = allTools//.filter(tool => tool.name !== 'browser_type');
       console.log(`Available tools: ${this.tools.map(t => t.name).join(', ')}`);
       
       // Start health check monitoring
