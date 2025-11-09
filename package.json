@@ -2,6 +2,7 @@
   "name": "conversational-playwright",
   "version": "1.0.0",
   "description": "ElectronJS app with conversational AI and Playwright MCP integration",
+  "productName": "ConversePlay",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",

@@ -44,6 +44,11 @@ app.whenReady().then(async () => {
   console.log('Starting parallel initialization...');
   
   createWindow();
+
+  // Set the dock icon for macOS
+  if (process.platform === 'darwin') {
+    app.dock.setIcon(path.join(__dirname, '..', 'assets', 'icon.png'));
+  }
   
   const serviceInitialization = (async () => {
     try {

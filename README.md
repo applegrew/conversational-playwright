@@ -17,6 +17,12 @@ A test automation application that combines conversational AI with browser autom
   - **Gemini**: Get from [Google AI Studio](https://aistudio.google.com/app/apikey)
   - **Claude**: Get from [Anthropic Console](https://console.anthropic.com/)
 
+### Note on models
+
+- Although Claude is supported but it has not been tested for accuracy.
+- Gemini 2.5 Flash Lite seems to provide good accurate results.
+- Gemini 2.0 Flash Lite works too but is unable to handle login pages and sometimes fails in mysterious ways.
+
 ## Installation
 
 1. Clone the repository:
