@@ -8,12 +8,15 @@ const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const fpsCounter = document.getElementById('fpsCounter');
 const llmBadge = document.getElementById('llmBadge');
+const streamStatus = document.getElementById('streamStatus');
+const streamStatusDot = document.getElementById('streamStatusDot');
 
 // State
-let isStreaming = false;
 let messageHistory = [];
-let fpsFrames = [];
-let lastFrameTime = Date.now();
+
+// FPS calculation state
+const fpsBuffer = [];
+const fpsBufferSize = 30; // Average over 30 frames
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
@@ -22,47 +25,49 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function initializeApp() {
-    try {
-        console.log('[Renderer] Initializing app...');
-        
-        // Check if MCP tools are available
-        console.log('[Renderer] Checking MCP tools...');
-        const result = await window.electronAPI.getMCPTools();
-        if (result.success) {
-            console.log('[Renderer] Available MCP tools:', result.tools.length);
-            
-            // Wait for services to be ready before getting provider and starting screenshot stream
-            console.log('[Renderer] Waiting for services to be ready...');
-            window.electronAPI.onServicesReady(async () => {
-                console.log('[Renderer] Services ready!');
-                
-                // Get LLM provider now that services are initialized
-                const providerResult = await window.electronAPI.getLLMProvider();
-                if (providerResult.success) {
-                    const provider = providerResult.provider;
-                    llmBadge.textContent = provider === 'gemini' ? 'Gemini' : 'Claude';
-                    if (provider === 'gemini') {
-                        llmBadge.classList.add('gemini');
-                    }
-                    console.log('[Renderer] Using LLM provider:', provider);
-                    
-                    // Now that LLM service is ready, update status to Connected
-                    updateStatus('connected', 'Connected');
+    console.log('[Renderer] Initializing app, waiting for services-ready event...');
+    updateStatus('initializing', 'Connecting...');
+
+    window.electronAPI.onServicesReady(async () => {
+        try {
+            console.log('[Renderer] Services are ready. Initializing UI features...');
+
+            // 1. Get LLM Provider
+            const providerResult = await window.electronAPI.getLLMProvider();
+            if (providerResult.success) {
+                const provider = providerResult.provider;
+                llmBadge.textContent = provider === 'gemini' ? 'Gemini' : 'Claude';
+                if (provider === 'gemini') {
+                    llmBadge.classList.add('gemini');
                 }
-                
-                // Auto-start screenshot stream
-                console.log('[Renderer] Auto-starting screenshot stream...');
-                await startStream();
-                console.log('[Renderer] Screenshot stream start completed');
-            });
-        } else {
-            updateStatus('error', 'Connection Error');
-            console.error('[Renderer] Failed to get MCP tools:', result.error);
+                console.log('[Renderer] Using LLM provider:', provider);
+            } else {
+                console.error('[Renderer] Failed to get LLM provider:', providerResult.error);
+            }
+
+            // 2. Check for MCP Tools
+            const toolsResult = await window.electronAPI.getMCPTools();
+            if (toolsResult.success) {
+                console.log('[Renderer] Available MCP tools:', toolsResult.tools.length);
+            } else {
+                console.error('[Renderer] Failed to get MCP tools:', toolsResult.error);
+                updateStatus('error', 'MCP Error');
+                return; // Stop initialization if MCP tools fail
+            }
+
+            // 3. Update status to Connected
+            updateStatus('connected', 'Connected');
+
+            // 4. Auto-start screenshot stream
+            console.log('[Renderer] Auto-starting screenshot stream...');
+            await startStream();
+            console.log('[Renderer] Screenshot stream start completed');
+
+        } catch (error) {
+            updateStatus('error', 'Initialization Failed');
+            console.error('[Renderer] Error during service-ready initialization:', error);
         }
-    } catch (error) {
-        updateStatus('error', 'Initialization Failed');
-        console.error('[Renderer] Initialization error:', error);
-    }
+    });
 }
 
 function setupEventListeners() {
@@ -77,12 +82,11 @@ function setupEventListeners() {
         }
     });
     
-    // Screenshot stream is auto-started in initializeApp
-    
     // Listen for screenshot updates
     window.electronAPI.onScreenshotUpdate((screenshot) => {
         updateScreenshot(screenshot);
         updateFPS();
+        updateStreamStatus('live');
     });
 }
 
@@ -132,27 +136,17 @@ async function sendMessageToBackend(message) {
 }
 
 async function startStream() {
-    console.log('[Renderer] startStream called, isStreaming:', isStreaming);
-    if (isStreaming) {
-        console.log('[Renderer] Already streaming, returning');
-        return;
-    }
-    
-    // Start streaming
-    console.log('[Renderer] Calling startScreenshotStream...');
     const result = await window.electronAPI.startScreenshotStream();
-    console.log('[Renderer] startScreenshotStream result:', result);
     if (result.success) {
-        isStreaming = true;
         const placeholder = document.querySelector('.canvas-placeholder');
         if (placeholder) {
-            console.log('[Renderer] Hiding placeholder');
             placeholder.style.display = 'none';
         }
         screenshotImage.style.display = 'block';
-        console.log('[Renderer] Screenshot stream started successfully');
+        updateStreamStatus('live');
     } else {
         console.error('[Renderer] Failed to start screenshot stream:', result.error);
+        updateStreamStatus('stopped', 'Error');
     }
 }
 
@@ -296,13 +290,23 @@ function updateScreenshot(screenshot) {
 
 function updateFPS() {
     const now = Date.now();
-    fpsFrames.push(now);
+    fpsBuffer.push(now);
+    if (fpsBuffer.length > fpsBufferSize) {
+        fpsBuffer.shift();
+    }
     
-    // Keep only frames from the last second
-    fpsFrames = fpsFrames.filter(time => now - time < 1000);
+    if (fpsBuffer.length < 2) {
+        return;
+    }
     
-    const fps = fpsFrames.length;
+    const elapsed = now - fpsBuffer[0];
+    const fps = Math.round((fpsBuffer.length / elapsed) * 1000);
     fpsCounter.textContent = `${fps} FPS`;
+}
+
+function updateStreamStatus(status, text) {
+    streamStatusDot.className = `status-dot-small ${status}`;
+    streamStatus.textContent = text || (status.charAt(0).toUpperCase() + status.slice(1));
 }
 
 function updateStatus(status, text) {

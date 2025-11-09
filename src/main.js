@@ -1,6 +1,7 @@
-const { app, BrowserWindow, ipcMain } = require('electron/main');
+const { app, BrowserWindow, dialog } = require('electron/main');
 const path = require('node:path');
 const logger = require('./utils/logger');
+const { initializeIpcHandlers } = require('./ipcManager');
 
 let mainWindow;
 let mcpService;
@@ -41,7 +42,7 @@ app.whenReady().then(async () => {
   // They don't depend on each other, so this speeds up startup
   console.log('Starting parallel initialization...');
   
-  const windowCreation = Promise.resolve(createWindow());
+  createWindow();
   
   const serviceInitialization = (async () => {
     try {
@@ -68,29 +69,30 @@ app.whenReady().then(async () => {
     } catch (error) {
       console.error('Error initializing services:', error);
       console.error('Stack trace:', error.stack);
-      // Show error dialog to user
-      const { dialog } = require('electron/main');
       dialog.showErrorBox('Initialization Error', `Failed to initialize services: ${error.message}`);
       throw error;
     }
   })();
   
-  // Wait for both to complete
-  await Promise.all([windowCreation, serviceInitialization]);
-  
-  // Wait for renderer to be ready before sending services-ready event
+  await serviceInitialization;
+
+  // Initialize IPC handlers now that all services are ready
+  initializeIpcHandlers({ llmService, mcpService, screenshotService, mainWindow });
+
+  // Notify the renderer that all services are ready
   if (mainWindow && mainWindow.webContents) {
-    // Check if page has already loaded
-    if (mainWindow.webContents.isLoading()) {
-      // Wait for page to finish loading
-      mainWindow.webContents.once('did-finish-load', () => {
+    const sendServicesReady = () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('services-ready');
-        console.log('Sent services-ready event to renderer (after page load)');
-      });
+        logger.info('Services ready event sent to renderer.');
+      }
+    };
+
+    // If window is still loading, wait for it to finish. Otherwise, send immediately.
+    if (mainWindow.webContents.isLoading()) {
+      mainWindow.webContents.once('did-finish-load', sendServicesReady);
     } else {
-      // Page already loaded, send immediately
-      mainWindow.webContents.send('services-ready');
-      console.log('Sent services-ready event to renderer (page already loaded)');
+      sendServicesReady();
     }
   }
 
@@ -108,108 +110,14 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async () => {
-  // Cleanup services
+  logger.info('before-quit event received, cleaning up...');
   if (screenshotService) {
     screenshotService.stop();
   }
   if (mcpService) {
     await mcpService.cleanup();
   }
+  logger.info('Cleanup complete.');
 });
 
-// Handle process termination signals for proper cleanup
-process.on('SIGINT', async () => {
-  console.log('Received SIGINT, cleaning up...');
-  if (mcpService) {
-    await mcpService.cleanup();
-  }
-  process.exit(0);
-});
 
-process.on('SIGTERM', async () => {
-  console.log('Received SIGTERM, cleaning up...');
-  if (mcpService) {
-    await mcpService.cleanup();
-  }
-  process.exit(0);
-});
-
-// IPC Handlers
-ipcMain.handle('send-message', async (event, message) => {
-  try {
-    if (!llmService) {
-      return { success: false, error: 'LLM service not initialized' };
-    }
-    const response = await llmService.processMessage(message);
-    return { success: true, response };
-  } catch (error) {
-    console.error('Error processing message:', error);
-    // Return full error object with status info for proper formatting in UI
-    const errorInfo = {
-      message: error.message || 'An error occurred',
-      status: error.status,
-      statusText: error.statusText
-    };
-    return { success: false, error: errorInfo };
-  }
-});
-
-ipcMain.handle('start-screenshot-stream', async (event) => {
-  try {
-    logger.debug('start-screenshot-stream called');
-    if (!screenshotService) {
-      logger.error('Screenshot service not initialized');
-      return { success: false, error: 'Screenshot service not initialized' };
-    }
-    logger.info('Starting screenshot service...');
-    screenshotService.start((screenshot) => {
-      if (screenshot) {
-        logger.verbose('Screenshot captured, sending to renderer');
-        mainWindow.webContents.send('screenshot-update', screenshot);
-      } else {
-        logger.verbose('Screenshot is null');
-      }
-    });
-    logger.info('Screenshot service started');
-    return { success: true };
-  } catch (error) {
-    console.error('Error starting screenshot stream:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('stop-screenshot-stream', async (event) => {
-  try {
-    screenshotService.stop();
-    return { success: true };
-  } catch (error) {
-    console.error('Error stopping screenshot stream:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('get-mcp-tools', async (event) => {
-  try {
-    if (!mcpService) {
-      return { success: false, error: 'MCP service not initialized' };
-    }
-    const tools = await mcpService.getAvailableTools();
-    return { success: true, tools };
-  } catch (error) {
-    console.error('Error getting MCP tools:', error);
-    return { success: false, error: error.message };
-  }
-});
-
-ipcMain.handle('get-llm-provider', async (event) => {
-  try {
-    if (!llmService) {
-      return { success: false, error: 'LLM service not initialized' };
-    }
-    const provider = llmService.provider;
-    return { success: true, provider };
-  } catch (error) {
-    console.error('Error getting LLM provider:', error);
-    return { success: false, error: error.message };
-  }
-});

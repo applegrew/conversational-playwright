@@ -355,12 +355,35 @@ body {
     gap: 16px;
 }
 
+.stream-status-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
 
+.status-dot-small {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #888; /* Default to gray */
+    transition: background-color 0.3s ease;
+}
+
+.status-dot-small.live {
+    background-color: #2ecc71; /* Green for live */
+}
+
+.status-dot-small.paused {
+    background-color: #f39c12; /* Orange for paused */
+}
+
+.status-dot-small.stopped {
+    background-color: #e74c3c; /* Red for stopped */
+}
 
 .fps-counter {
-    font-size: 14px;
-    color: #a0a0a0;
-    font-variant-numeric: tabular-nums;
+    font-size: 0.8rem;
+    color: #888;
 }
 
 .canvas-content {

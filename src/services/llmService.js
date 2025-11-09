@@ -195,6 +195,43 @@ Always respond in a helpful and friendly manner.`;
     return cleaned;
   }
 
+  pruneHistory() {
+    const maxMessages = 20;
+    if (this.conversationHistory.length <= maxMessages) {
+      return;
+    }
+
+    console.log(`Pruning history from ${this.conversationHistory.length} messages...`);
+
+    // Find the index of the first 'user' message to ensure we don't start with a 'model' response
+    const firstUserIndex = this.conversationHistory.findIndex(m => m.role === 'user');
+    if (firstUserIndex === -1) {
+      // Should not happen in a valid conversation, but as a safeguard:
+      this.conversationHistory = [];
+      return;
+    }
+    
+    // Start pruning from the first user message
+    let prunedHistory = this.conversationHistory.slice(firstUserIndex);
+    
+    // Keep removing messages from the beginning until we are under the limit
+    while (prunedHistory.length > maxMessages) {
+      // Find the next 'user' message to start a new turn
+      const nextUserIndex = prunedHistory.findIndex((m, i) => i > 0 && m.role === 'user');
+      if (nextUserIndex > 0) {
+        prunedHistory = prunedHistory.slice(nextUserIndex);
+      } else {
+        // If no more user messages, we have to truncate from the end, which is not ideal
+        // but necessary to meet the length constraint.
+        prunedHistory = prunedHistory.slice(prunedHistory.length - maxMessages);
+        break;
+      }
+    }
+
+    this.conversationHistory = prunedHistory;
+    console.log(`History pruned to ${this.conversationHistory.length} messages.`);
+  }
+
   async processMessageGemini(userMessage) {
     try {
       console.log('Processing message with Gemini:', userMessage);
@@ -291,37 +328,41 @@ Now, please handle this request by calling the appropriate tools:`;
               }
             }
             
-            // If it's a navigation success, get fresh snapshot automatically
+            // If it's a navigation success, check if the tool result already contains a snapshot
             if (isNavigationSuccess) {
-              console.log('Getting fresh snapshot after navigation...');
-              try {
-                // Wait a bit for page to load
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                const snapshotResult = await this.mcpService.callTool('browser_snapshot', {});
-                
-                // Send the snapshot as the response instead of the error
-                functionResponses.push({
-                  functionResponse: {
-                    name: functionCall.name,
-                    response: {
-                      content: [
-                        {
-                          type: 'text',
-                          text: `### Result\nSuccessfully executed ${functionCall.name}. Page navigated.\n\n${snapshotResult.content[0].text}`
-                        }
-                      ]
+              const hasSnapshot = toolResult.content && toolResult.content.some(c => c.text && c.text.includes('Page Snapshot'));
+
+              // If the navigation result does NOT include a snapshot (e.g. from a click), get one.
+              if (!hasSnapshot) {
+                console.log('Getting fresh snapshot after navigation...');
+                try {
+                  // Wait a bit for page to load
+                  await new Promise(resolve => setTimeout(resolve, 1000));
+                  const snapshotResult = await this.mcpService.callTool('browser_snapshot', {});
+                  
+                  // Send the snapshot as the response instead of the error
+                  functionResponses.push({
+                    functionResponse: {
+                      name: functionCall.name,
+                      response: {
+                        content: [
+                          {
+                            type: 'text',
+                            text: `### Result\nSuccessfully executed ${functionCall.name}. Page navigated.\n\n${snapshotResult.content[0].text}`
+                          }
+                        ]
+                      }
                     }
-                  }
-                });
-              } catch (snapshotError) {
-                console.error('Error getting snapshot after navigation:', snapshotError);
-                // Fall back to original result
-                functionResponses.push({
-                  functionResponse: {
-                    name: functionCall.name,
-                    response: toolResult
-                  }
-                });
+                  });
+                } catch (snapshotError) {
+                  console.error('Error getting snapshot after navigation:', snapshotError);
+                  // Fall back to original error-like-success message
+                  functionResponses.push({ functionResponse: { name: functionCall.name, response: toolResult } });
+                }
+              } else {
+                // The navigation result already has a snapshot, so just use it.
+                console.log('Navigation result already contains a snapshot.');
+                functionResponses.push({ functionResponse: { name: functionCall.name, response: toolResult } });
               }
             } else {
               // Normal result (success or actual error)
@@ -361,24 +402,8 @@ Now, please handle this request by calling the appropriate tools:`;
       // Update conversation history for next turn
       this.conversationHistory = await chat.getHistory();
       
-      // Keep conversation history manageable (last 20 messages)
-      // But ensure we always start with a user message (Gemini requirement)
-      if (this.conversationHistory.length > 20) {
-        let slicedHistory = this.conversationHistory.slice(-20);
-        
-        // Find the first user message in the sliced history
-        const firstUserIndex = slicedHistory.findIndex(msg => msg.role === 'user');
-        
-        if (firstUserIndex > 0) {
-          // If history doesn't start with user message, slice from first user message
-          slicedHistory = slicedHistory.slice(firstUserIndex);
-        } else if (firstUserIndex === -1) {
-          // If no user message found, clear history (shouldn't happen but be safe)
-          slicedHistory = [];
-        }
-        
-        this.conversationHistory = slicedHistory;
-      }
+      // Prune history to keep it manageable, while preserving conversation structure.
+      this.pruneHistory();
 
       return textContent || 'I executed the requested action.';
     } catch (error) {

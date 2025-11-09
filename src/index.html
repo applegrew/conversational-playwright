@@ -56,7 +56,11 @@
             <div class="canvas-header">
                 <h2>Browser View</h2>
                 <div class="canvas-controls">
-                    <span class="fps-counter" id="fpsCounter">0 FPS</span>
+                    <div class="status-item" id="fpsCounter">-- FPS</div>
+                    <div class="status-item stream-status-item">
+                        <span id="streamStatusDot" class="status-dot-small"></span>
+                        <span id="streamStatus">Stopped</span>
+                    </div>
                 </div>
             </div>
             

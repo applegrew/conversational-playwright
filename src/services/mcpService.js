@@ -54,42 +54,51 @@ class MCPService {
         }
       });
       
-      // Wait for server to be ready by testing the HTTP endpoint
+      // Wait for server to be ready by polling the health endpoint with retry logic
       console.log('Waiting for MCP server to be ready...');
       const serverUrl = `http://localhost:${serverPort}`;
-      const maxAttempts = 180;
-      let attempts = 0;
-      let serverReady = false;
-      
-      while (attempts < maxAttempts && !serverReady) {
-        try {
-          await new Promise((resolve, reject) => {
-            const req = http.get(`${serverUrl}/health`, (res) => {
-              if (res.statusCode === 200 || res.statusCode === 404 || res.statusCode === 400) {
-                // 404/400 is ok - server is running, just no /health endpoint
-                serverReady = true;
-              }
+
+      const retry = async (fn, options) => {
+        const { retries, factor, minTimeout, maxTimeout } = {
+          retries: 15, // Approx 90 seconds total with backoff
+          factor: 1.5,
+          minTimeout: 500,
+          maxTimeout: 10000,
+          ...options,
+        };
+
+        let lastError;
+
+        for (let i = 0; i < retries; i++) {
+          try {
+            return await fn();
+          } catch (error) {
+            lastError = error;
+            const timeout = Math.min(maxTimeout, minTimeout * Math.pow(factor, i));
+            logger.debug(`MCP health check attempt ${i + 1}/${retries} failed. Retrying in ${timeout}ms...`);
+            await new Promise(resolve => setTimeout(resolve, timeout));
+          }
+        }
+        throw new Error(`MCP server did not become ready after ${retries} attempts. Last error: ${lastError.message}`);
+      };
+
+      await retry(async () => {
+        return new Promise((resolve, reject) => {
+          const req = http.get(`${serverUrl}/health`, (res) => {
+            // Any 2xx, 3xx, or 4xx status code indicates the server is running.
+            if (res.statusCode >= 200 && res.statusCode < 500) {
               resolve();
-            });
-            req.on('error', () => resolve()); // Ignore errors, will retry
-            req.setTimeout(500, () => {
-              req.destroy();
-              resolve();
-            });
+            } else {
+              reject(new Error(`Server not ready, status code: ${res.statusCode}`));
+            }
           });
-        } catch (err) {
-          console.warn('MCP server health check failed:', err);
-        }
-        
-        if (!serverReady) {
-          await new Promise(resolve => setTimeout(resolve, 500));
-          attempts++;
-        }
-      }
-      
-      if (!serverReady) {
-        throw new Error(`MCP server did not start within ${maxAttempts * 0.5} seconds`);
-      }
+          req.on('error', (err) => reject(err));
+          req.setTimeout(1000, () => {
+            req.destroy();
+            reject(new Error('Health check request timed out'));
+          });
+        });
+      });
       
       console.log('MCP server is ready!');
       
