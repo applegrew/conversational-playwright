@@ -15,6 +15,7 @@ class MCPService {
     this.maxReconnectAttempts = 3;
     this.screenshotService = null; // Will be set by main.js
     this.mainWindow = null; // Will be set by main.js
+    this.currentPageUrl = ''; // Track current page URL
   }
 
   async initialize() {
@@ -33,7 +34,7 @@ class MCPService {
       
       // Start the MCP server manually with --port flag
       console.log(`Starting MCP server on port ${serverPort}...`);
-      this.serverProcess = spawn('npx', ['@playwright/mcp@latest', '--browser', 'chrome', '--caps', 'vision', '--headless', '--port', serverPort.toString()], {
+      this.serverProcess = spawn('npx', ['@playwright/mcp@latest', '--browser', 'chrome', '--caps', 'vision', '--viewport-size', '1920x1080', '--headless', '--port', serverPort.toString()], {
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe']
       });
@@ -211,6 +212,18 @@ class MCPService {
         arguments: args
       });
 
+      // Extract and store URL from navigation results
+      if (toolName === 'browser_navigate' && result && result.content && result.content.length > 0) {
+        const content = result.content[0];
+        if (content.type === 'text' && content.text) {
+          const urlMatch = content.text.match(/- Page URL: (.+)/m);
+          if (urlMatch && urlMatch[1]) {
+            this.currentPageUrl = urlMatch[1].trim();
+            logger.info('[MCPService] Current page URL updated to:', this.currentPageUrl);
+          }
+        }
+      }
+
       // If we just navigated and the screenshot service is stopped, restart it
       if (toolName === 'browser_navigate' && this.screenshotService && !this.screenshotService.isRunning) {
         logger.info('Browser navigated after close, restarting screenshot stream.');
@@ -275,6 +288,11 @@ class MCPService {
       
       throw error;
     }
+  }
+
+  async getCurrentUrl() {
+    // Simply return the tracked URL - no need to make additional tool calls
+    return this.currentPageUrl;
   }
 
   async takeScreenshot() {

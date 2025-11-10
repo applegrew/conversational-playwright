@@ -4,6 +4,7 @@ const chatInput = document.getElementById('chatInput');
 const sendButton = document.getElementById('sendButton');
 const screenshotImage = document.getElementById('screenshotImage');
 const canvasContent = document.getElementById('canvasContent');
+const urlDisplay = document.getElementById('urlDisplay');
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const fpsCounter = document.getElementById('fpsCounter');
@@ -13,6 +14,8 @@ const streamStatusDot = document.getElementById('streamStatusDot');
 
 // State
 let messageHistory = [];
+let currentPageUrl = '';
+let urlUpdateInterval = null;
 
 // FPS calculation state
 const fpsBuffer = [];
@@ -63,6 +66,9 @@ async function initializeApp() {
             await startStream();
             console.log('[Renderer] Screenshot stream start completed');
 
+            // 5. Start periodic URL updates
+            startUrlUpdates();
+
         } catch (error) {
             updateStatus('error', 'Initialization Failed');
             console.error('[Renderer] Error during service-ready initialization:', error);
@@ -100,6 +106,10 @@ function setupEventListeners() {
     window.electronAPI.onStreamStarted(() => {
         console.log('[Renderer] Screenshot stream started');
         updateStreamStatus('live', 'Live');
+        // Resume URL updates when stream starts
+        if (!urlUpdateInterval) {
+            startUrlUpdates();
+        }
     });
 }
 
@@ -304,15 +314,68 @@ function updateScreenshot(screenshot) {
         if (placeholder) {
             placeholder.style.display = 'none';
         }
+        // Update URL display
+        updateUrlDisplay();
     }
+}
+
+function updateUrlDisplay() {
+    // Hide URL display only if we're on blank.html
+    // Don't hide if URL is empty - it might just be loading
+    if (currentPageUrl && currentPageUrl.includes('/blank.html')) {
+        urlDisplay.style.display = 'none';
+    } else if (currentPageUrl) {
+        urlDisplay.textContent = currentPageUrl;
+        urlDisplay.style.display = 'block';
+    }
+    // If currentPageUrl is empty, don't change display state
+}
+
+function setCurrentUrl(url) {
+    currentPageUrl = url;
+    updateUrlDisplay();
 }
 
 function showPlaceholder() {
     // Hide screenshot, show placeholder
     screenshotImage.style.display = 'none';
+    urlDisplay.style.display = 'none';
     const placeholder = canvasContent.querySelector('.canvas-placeholder');
     if (placeholder) {
         placeholder.style.display = 'flex';
+    }
+    // Stop URL updates when showing placeholder
+    stopUrlUpdates();
+}
+
+function startUrlUpdates() {
+    // Update URL immediately
+    updateCurrentUrl();
+    // Then update every 2 seconds
+    if (!urlUpdateInterval) {
+        urlUpdateInterval = setInterval(updateCurrentUrl, 2000);
+    }
+}
+
+function stopUrlUpdates() {
+    if (urlUpdateInterval) {
+        clearInterval(urlUpdateInterval);
+        urlUpdateInterval = null;
+    }
+}
+
+async function updateCurrentUrl() {
+    try {
+        const result = await window.electronAPI.getCurrentUrl();
+        console.log('[Renderer] URL fetch result:', result);
+        if (result.success && result.url) {
+            console.log('[Renderer] Setting URL to:', result.url);
+            setCurrentUrl(result.url);
+        } else {
+            console.log('[Renderer] No URL in result or fetch failed');
+        }
+    } catch (error) {
+        console.error('[Renderer] Error fetching current URL:', error);
     }
 }
 

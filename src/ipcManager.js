@@ -89,6 +89,19 @@ function initializeIpcHandlers(services) {
       return { success: false, error: error.message };
     }
   });
+
+  ipcMain.handle('get-current-url', async (event) => {
+    if (!mcpService) {
+      return { success: false, error: 'MCP service not initialized' };
+    }
+    try {
+      const url = await mcpService.getCurrentUrl();
+      return { success: true, url };
+    } catch (error) {
+      logger.error('Error getting current URL:', error);
+      return { success: false, error: error.message };
+    }
+  });
 }
 
 module.exports = { initializeIpcHandlers };

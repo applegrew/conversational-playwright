@@ -424,3 +424,28 @@ body {
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
+
+.url-display {
+    display: none; /* Hidden by default, JavaScript will show it */
+    background: rgba(32, 32, 32, 0.96);
+    backdrop-filter: blur(12px);
+    color: #e8e8e8;
+    padding: 8px 14px;
+    border-radius: 8px 8px 0 0;
+    font-size: 12px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    z-index: 10;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+    line-height: 1.4;
+}
+
+.url-display:hover {
+    background: rgba(38, 38, 38, 0.98);
+    white-space: normal;
+    word-break: break-all;
+}
