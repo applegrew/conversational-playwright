@@ -71,6 +71,11 @@ app.whenReady().then(async () => {
       console.log('Creating Screenshot service...');
       screenshotService = new ScreenshotService(mcpService);
       console.log('Screenshot service created');
+
+      // Provide the screenshotService instance to the mcpService
+      mcpService.setScreenshotService(screenshotService);
+      // Provide the mainWindow instance to the mcpService
+      mcpService.setMainWindow(mainWindow);
       
       console.log('All services initialized successfully');
     } catch (error) {

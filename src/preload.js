@@ -21,5 +21,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onServicesReady: (callback) => {
     ipcRenderer.on('services-ready', () => callback());
+  },
+  onStreamStopped: (callback) => {
+    ipcRenderer.on('stream-stopped', () => callback());
+  },
+  onStreamStarted: (callback) => {
+    ipcRenderer.on('stream-started', () => callback());
   }
 });

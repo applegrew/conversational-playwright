@@ -88,6 +88,19 @@ function setupEventListeners() {
         updateFPS();
         updateStreamStatus('live');
     });
+
+    // Listen for stream stop events
+    window.electronAPI.onStreamStopped(() => {
+        console.log('[Renderer] Screenshot stream stopped');
+        showPlaceholder();
+        updateStreamStatus('stopped', 'Stopped');
+    });
+
+    // Listen for stream start events
+    window.electronAPI.onStreamStarted(() => {
+        console.log('[Renderer] Screenshot stream started');
+        updateStreamStatus('live', 'Live');
+    });
 }
 
 async function handleSendMessage() {
@@ -285,6 +298,21 @@ function removeLoadingMessage(loadingId) {
 function updateScreenshot(screenshot) {
     if (screenshot) {
         screenshotImage.src = `data:image/png;base64,${screenshot}`;
+        // Show screenshot, hide placeholder
+        screenshotImage.style.display = 'block';
+        const placeholder = canvasContent.querySelector('.canvas-placeholder');
+        if (placeholder) {
+            placeholder.style.display = 'none';
+        }
+    }
+}
+
+function showPlaceholder() {
+    // Hide screenshot, show placeholder
+    screenshotImage.style.display = 'none';
+    const placeholder = canvasContent.querySelector('.canvas-placeholder');
+    if (placeholder) {
+        placeholder.style.display = 'flex';
     }
 }
 

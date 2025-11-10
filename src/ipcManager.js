@@ -36,6 +36,10 @@ function initializeIpcHandlers(services) {
         }
       });
       logger.info('Screenshot service started');
+      // Notify renderer that stream has started
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('stream-started');
+      }
       return { success: true };
     } catch (error) {
       logger.error('Error starting screenshot stream:', error);
@@ -49,6 +53,10 @@ function initializeIpcHandlers(services) {
     }
     try {
       screenshotService.stop();
+      // Notify renderer that stream has stopped
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('stream-stopped');
+      }
       return { success: true };
     } catch (error) {
       logger.error('Error stopping screenshot stream:', error);

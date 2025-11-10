@@ -13,6 +13,8 @@ class MCPService {
     this.healthCheckInterval = null;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 3;
+    this.screenshotService = null; // Will be set by main.js
+    this.mainWindow = null; // Will be set by main.js
   }
 
   async initialize() {
@@ -24,6 +26,8 @@ class MCPService {
       const { SSEClientTransport } = await import('@modelcontextprotocol/sdk/client/sse.js');
       const { spawn } = require('child_process');
       const http = require('http');
+      const path = require('path');
+      const url = require('url');
       
       const serverPort = process.env.MCP_SERVER_PORT || 3000;
       
@@ -131,6 +135,17 @@ class MCPService {
       // Start health check monitoring
       this.startHealthCheck();
 
+      // Navigate to the custom blank page on startup
+      try {
+        const blankPagePath = path.join(__dirname, '..', '..', 'assets', 'html', 'blank.html');
+        const blankPageUrl = url.pathToFileURL(blankPagePath).href;
+        logger.info(`Navigating to initial page: ${blankPageUrl}`);
+        await this.callTool('browser_navigate', { url: blankPageUrl });
+      } catch (navError) {
+        logger.error('Failed to navigate to initial blank page:', navError);
+        // Continue anyway, will default to about:blank
+      }
+
       return true;
     } catch (error) {
       console.error('Error initializing MCP service:', error);
@@ -154,6 +169,14 @@ class MCPService {
     return this.tools;
   }
 
+  setScreenshotService(service) {
+    this.screenshotService = service;
+  }
+
+  setMainWindow(window) {
+    this.mainWindow = window;
+  }
+
   async callTool(toolName, args, options = {}) {
     try {
       const isStreaming = options.isStreaming || false;
@@ -165,6 +188,16 @@ class MCPService {
         throw error;
       }
       
+      // If the browser is about to be closed, stop the screenshot stream first to prevent blank frames
+      if (toolName === 'browser_close' && this.screenshotService) {
+        logger.info('Browser is closing, stopping screenshot stream.');
+        this.screenshotService.stop();
+        // Notify renderer that stream has stopped
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send('stream-stopped');
+        }
+      }
+
       // For screenshot calls from streaming service, only log at verbose level
       if (toolName === 'browser_take_screenshot' && isStreaming) {
         logger.verbose(`Calling tool: ${toolName} (streaming)`);
@@ -177,6 +210,20 @@ class MCPService {
         name: toolName,
         arguments: args
       });
+
+      // If we just navigated and the screenshot service is stopped, restart it
+      if (toolName === 'browser_navigate' && this.screenshotService && !this.screenshotService.isRunning) {
+        logger.info('Browser navigated after close, restarting screenshot stream.');
+        this.screenshotService.start((screenshot) => {
+          if (screenshot && this.mainWindow && !this.mainWindow.isDestroyed()) {
+            this.mainWindow.webContents.send('screenshot-update', screenshot);
+          }
+        });
+        // Notify renderer that stream has started
+        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+          this.mainWindow.webContents.send('stream-started');
+        }
+      }
       
       // Update last successful call timestamp
       this.lastSuccessfulCall = Date.now();
