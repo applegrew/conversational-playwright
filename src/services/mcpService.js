@@ -179,8 +179,9 @@ class MCPService {
   }
 
   async callTool(toolName, args, options = {}) {
+    const isStreaming = options.isStreaming || false;
+    
     try {
-      const isStreaming = options.isStreaming || false;
       
       // Check if client is available (might be null during reconnection)
       if (!this.client) {

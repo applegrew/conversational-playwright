@@ -367,12 +367,12 @@ function stopUrlUpdates() {
 async function updateCurrentUrl() {
     try {
         const result = await window.electronAPI.getCurrentUrl();
-        console.log('[Renderer] URL fetch result:', result);
         if (result.success && result.url) {
-            console.log('[Renderer] Setting URL to:', result.url);
+            // Only log if URL actually changed to avoid spam
+            if (result.url !== currentPageUrl) {
+                console.log('[Renderer] URL changed to:', result.url);
+            }
             setCurrentUrl(result.url);
-        } else {
-            console.log('[Renderer] No URL in result or fetch failed');
         }
     } catch (error) {
         console.error('[Renderer] Error fetching current URL:', error);
