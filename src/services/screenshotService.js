@@ -9,6 +9,7 @@ class ScreenshotService {
     this.consecutiveErrors = 0;
     this.maxConsecutiveErrors = 5;
     this.isPaused = false;
+    this.lastScreenshot = null; // Cache the last screenshot for LLM reuse
   }
 
   start(callback) {
@@ -32,6 +33,8 @@ class ScreenshotService {
       try {
         const screenshot = await this.mcpService.takeScreenshot();
         if (screenshot && this.callback) {
+          // Cache the screenshot for LLM reuse
+          this.lastScreenshot = screenshot;
           this.callback(screenshot);
           // Reset error counter on success
           this.consecutiveErrors = 0;
@@ -114,6 +117,10 @@ class ScreenshotService {
   
   isActive() {
     return this.isRunning && !this.isPaused;
+  }
+  
+  getLastScreenshot() {
+    return this.lastScreenshot;
   }
 }
 
