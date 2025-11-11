@@ -129,8 +129,7 @@ class MCPService {
       // List available tools
       const toolsList = await this.client.listTools();
       const allTools = toolsList.tools || [];
-      // Filter out the redundant browser_type tool to avoid confusion with browser_fill_form
-      this.tools = allTools//.filter(tool => tool.name !== 'browser_type');
+      this.tools = allTools
       console.log(`Available tools: ${this.tools.map(t => t.name).join(', ')}`);
       
       // Start health check monitoring

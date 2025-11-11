@@ -1,3 +1,5 @@
+const logger = require('../utils/logger');
+
 class ScreenshotService {
   constructor(mcpService) {
     this.mcpService = mcpService;
@@ -127,7 +129,7 @@ class ScreenshotService {
       if (this.currentFPS !== this.maxFPS) {
         this.currentFPS = this.maxFPS;
         this.frameInterval = 1000 / this.currentFPS;
-        console.log(`[Adaptive FPS] Content changing → ${this.currentFPS} FPS`);
+        logger.verbose(`[Adaptive FPS] Content changing → ${this.currentFPS} FPS`);
       }
     } else {
       // Content unchanged
@@ -143,7 +145,7 @@ class ScreenshotService {
         if (newFPS !== this.currentFPS) {
           this.currentFPS = newFPS;
           this.frameInterval = 1000 / this.currentFPS;
-          console.log(`[Adaptive FPS] No changes detected → ${this.currentFPS} FPS`);
+          logger.verbose(`[Adaptive FPS] No changes detected → ${this.currentFPS} FPS`);
         }
       }
     }
