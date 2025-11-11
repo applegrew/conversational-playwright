@@ -320,9 +320,9 @@ function updateScreenshot(screenshot) {
 }
 
 function updateUrlDisplay() {
-    // Hide URL display only if we're on blank.html
+    // Hide URL display only if we're on about:blank or if URL is empty
     // Don't hide if URL is empty - it might just be loading
-    if (currentPageUrl && currentPageUrl.includes('/blank.html')) {
+    if (currentPageUrl && (currentPageUrl === 'about:blank' || currentPageUrl.includes('/blank.html'))) {
         urlDisplay.style.display = 'none';
     } else if (currentPageUrl) {
         urlDisplay.textContent = currentPageUrl;

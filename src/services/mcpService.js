@@ -142,6 +142,9 @@ class MCPService {
         const blankPageUrl = url.pathToFileURL(blankPagePath).href;
         logger.info(`Navigating to initial page: ${blankPageUrl}`);
         await this.callTool('browser_navigate', { url: blankPageUrl });
+        // Small delay to ensure page is fully loaded
+        await new Promise(resolve => setTimeout(resolve, 500));
+        logger.info('Initial page loaded successfully');
       } catch (navError) {
         logger.error('Failed to navigate to initial blank page:', navError);
         // Continue anyway, will default to about:blank

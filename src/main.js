@@ -76,6 +76,8 @@ app.whenReady().then(async () => {
       mcpService.setScreenshotService(screenshotService);
       // Provide the mainWindow instance to the mcpService
       mcpService.setMainWindow(mainWindow);
+      // Provide the screenshotService instance to the llmService
+      llmService.setScreenshotService(screenshotService);
       
       console.log('All services initialized successfully');
     } catch (error) {
