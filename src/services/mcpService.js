@@ -34,7 +34,7 @@ class MCPService {
       
       // Start the MCP server manually with --port flag
       console.log(`Starting MCP server on port ${serverPort}...`);
-      this.serverProcess = spawn('npx', ['@playwright/mcp@latest', '--browser', 'chrome', '--caps', 'vision', '--viewport-size', '1920x1080', '--headless', '--port', serverPort.toString()], {
+      this.serverProcess = spawn('npx', ['@playwright/mcp@latest', '--browser', 'chrome', '--caps', 'vision', '--isolated', '--viewport-size', '1920x1080', '--headless', '--port', serverPort.toString()], {
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe']
       });
