@@ -713,6 +713,15 @@ Note: **The screenshot is ALWAYS the source of truth.** The Page Snapshot may be
             });
           } else {
             try {
+              // Special handling for coordinate-based clicks - set visual indicator
+              if (functionCall.name === 'browser_mouse_click_xy' && this.screenshotService) {
+                const { x, y } = functionCall.args || {};
+                if (x !== undefined && y !== undefined) {
+                  logger.info(`[Click Indicator] LLM clicking at coordinates (${x}, ${y})`);
+                  this.screenshotService.setClickIndicator(x, y);
+                }
+              }
+              
               // Execute the tool via MCP
               const toolResult = await this.mcpService.callTool(
                 functionCall.name,
@@ -751,10 +760,13 @@ Note: **The screenshot is ALWAYS the source of truth.** The Page Snapshot may be
               // Try to enhance response with cached screenshot from screenshot service
               // This avoids making duplicate MCP calls to browser_take_screenshot
               try {
-                // Wait a bit for any animations/changes to complete
-                await new Promise(resolve => setTimeout(resolve, isNavigationSuccess ? 1000 : 500));
+                // For coordinate-based clicks, wait a bit longer to ensure red dot is drawn
+                const isCoordinateClick = functionCall.name === 'browser_mouse_click_xy';
+                const waitTime = isNavigationSuccess ? 1000 : (isCoordinateClick ? 800 : 500);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
                 
                 // Get the cached screenshot from screenshot service (already captured at 15 FPS)
+                // For coordinate clicks, this will include the red dot indicator
                 const cachedScreenshot = this.screenshotService ? this.screenshotService.getLastScreenshot() : null;
                 
                 // Detect visual changes by comparing before and after screenshots
@@ -805,8 +817,50 @@ Note: **The screenshot is ALWAYS the source of truth.** The Page Snapshot may be
                     functionResponses.push({ functionResponse: { name: functionCall.name, response: this.addVisualChangeInfoToToolResult(this.stripConsoleMessages(toolResult), visualChangeInfo) } });
                   }
                 } else {
-                  // Normal result - add visual change info only (no screenshot to save tokens)
-                  functionResponses.push({ functionResponse: { name: functionCall.name, response: this.addVisualChangeInfoToToolResult(this.stripConsoleMessages(toolResult), visualChangeInfo) } });
+                  // Special handling for coordinate-based clicks - send screenshot WITH red dot indicator
+                  if (isCoordinateClick && cachedScreenshot) {
+                    const enhancedResult = this.addVisualChangeInfoToToolResult(this.stripConsoleMessages(toolResult), visualChangeInfo);
+                    
+                    // Add the screenshot with the red dot indicator for LLM feedback
+                    if (!enhancedResult.content) {
+                      enhancedResult.content = [];
+                    }
+                    
+                    // Ensure content is an array
+                    if (!Array.isArray(enhancedResult.content)) {
+                      enhancedResult.content = [enhancedResult.content];
+                    }
+                    
+                    // Add text indicating the visual feedback
+                    const clickFeedbackText = `\n\n### Click Location Indicator\nA red dot has been drawn at the clicked coordinates (${functionCall.args?.x}, ${functionCall.args?.y}) in the screenshot below. This shows where your click action was executed. The red dot will remain visible for 10 seconds to help you verify the click location.`;
+                    
+                    // Add or update the text content
+                    if (enhancedResult.content.length > 0 && enhancedResult.content[0].text) {
+                      enhancedResult.content[0].text += clickFeedbackText;
+                    } else {
+                      enhancedResult.content.unshift({ text: clickFeedbackText });
+                    }
+                    
+                    // Add the screenshot with red dot
+                    enhancedResult.content.push({
+                      inlineData: {
+                        mimeType: 'image/png',
+                        data: cachedScreenshot
+                      }
+                    });
+                    
+                    logger.info(`[Click Indicator] Sending screenshot with red dot to LLM for coordinates (${functionCall.args?.x}, ${functionCall.args?.y})`);
+                    
+                    functionResponses.push({ 
+                      functionResponse: { 
+                        name: functionCall.name, 
+                        response: enhancedResult 
+                      } 
+                    });
+                  } else {
+                    // Normal result - add visual change info only (no screenshot to save tokens)
+                    functionResponses.push({ functionResponse: { name: functionCall.name, response: this.addVisualChangeInfoToToolResult(this.stripConsoleMessages(toolResult), visualChangeInfo) } });
+                  }
                 }
               } catch (error) {
                 console.error('Error enhancing response with screenshot:', error);

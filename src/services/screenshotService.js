@@ -1,4 +1,5 @@
 const logger = require('../utils/logger');
+const { createCanvas, loadImage } = require('canvas');
 
 class ScreenshotService {
   constructor(mcpService) {
@@ -20,6 +21,10 @@ class ScreenshotService {
     this.consecutiveErrors = 0;
     this.maxConsecutiveErrors = 5;
     this.isPaused = false;
+    // Click indicator for visual feedback
+    this.clickIndicator = null; // { x, y, timestamp }
+    this.clickIndicatorDuration = 10000; // Show for 10 seconds
+    this.clickIndicatorRadius = 20; // Red dot radius in pixels
   }
 
   start(callback) {
@@ -63,8 +68,14 @@ class ScreenshotService {
     }
     
     try {
-      const screenshot = await this.mcpService.takeScreenshot();
+      let screenshot = await this.mcpService.takeScreenshot();
+      
       if (screenshot && this.callback) {
+        // Check if we should draw a click indicator
+        if (this.clickIndicator && this.shouldShowClickIndicator()) {
+          screenshot = await this.drawClickIndicator(screenshot);
+        }
+        
         // Detect if screenshot changed
         const hasChanged = this.detectChange(screenshot);
         
@@ -259,6 +270,94 @@ class ScreenshotService {
   
   getLastScreenshot() {
     return this.lastScreenshot;
+  }
+  
+  /**
+   * Set a click indicator to be drawn on screenshots
+   * @param {number} x - X coordinate in pixels
+   * @param {number} y - Y coordinate in pixels
+   */
+  setClickIndicator(x, y) {
+    this.clickIndicator = {
+      x,
+      y,
+      timestamp: Date.now()
+    };
+    logger.info(`[Click Indicator] Set indicator at (${x}, ${y}) - will show for ${this.clickIndicatorDuration}ms`);
+  }
+  
+  /**
+   * Check if the click indicator should be shown
+   * @returns {boolean}
+   */
+  shouldShowClickIndicator() {
+    if (!this.clickIndicator) {
+      return false;
+    }
+    
+    const elapsed = Date.now() - this.clickIndicator.timestamp;
+    if (elapsed > this.clickIndicatorDuration) {
+      logger.verbose('[Click Indicator] Duration expired, removing indicator');
+      this.clickIndicator = null;
+      return false;
+    }
+    
+    return true;
+  }
+  
+  /**
+   * Draw a red dot on the screenshot at the click indicator position
+   * @param {string} screenshotBase64 - Base64 encoded screenshot
+   * @returns {Promise<string>} - Modified screenshot with red dot
+   */
+  async drawClickIndicator(screenshotBase64) {
+    try {
+      // Remove data URL prefix if present
+      const base64Data = screenshotBase64.replace(/^data:image\/\w+;base64,/, '');
+      const imageBuffer = Buffer.from(base64Data, 'base64');
+      
+      // Load the image
+      const img = await loadImage(imageBuffer);
+      
+      // Create a canvas with the same dimensions
+      const canvas = createCanvas(img.width, img.height);
+      const ctx = canvas.getContext('2d');
+      
+      // Draw the original screenshot
+      ctx.drawImage(img, 0, 0);
+      
+      // Draw the red dot
+      const { x, y } = this.clickIndicator;
+      
+      // Draw outer circle (slightly transparent red)
+      ctx.beginPath();
+      ctx.arc(x, y, this.clickIndicatorRadius, 0, 2 * Math.PI);
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+      ctx.fill();
+      
+      // Draw inner circle (solid red)
+      ctx.beginPath();
+      ctx.arc(x, y, this.clickIndicatorRadius / 2, 0, 2 * Math.PI);
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+      ctx.fill();
+      
+      // Draw white border
+      ctx.beginPath();
+      ctx.arc(x, y, this.clickIndicatorRadius, 0, 2 * Math.PI);
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      
+      // Convert back to base64
+      const modifiedBase64 = canvas.toBuffer('image/png').toString('base64');
+      
+      logger.verbose(`[Click Indicator] Drew red dot at (${x}, ${y})`);
+      return modifiedBase64;
+    } catch (error) {
+      logger.error('[Click Indicator] Failed to draw indicator:', error.message);
+      // Return original screenshot on error
+      return screenshotBase64;
+    }
   }
 }
 
