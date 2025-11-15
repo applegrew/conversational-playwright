@@ -191,6 +191,29 @@ class MCPService {
         error.code = 'CLIENT_NOT_AVAILABLE';
         throw error;
       }
+
+      // Scale coordinates for mouse-based tools
+      // Screenshots are captured at a different resolution (1464x823) than the viewport (1920x1080)
+      // We need to scale LLM-provided coordinates from screenshot space to viewport space
+      const coordinateTools = ['browser_mouse_click_xy', 'browser_mouse_move_xy', 'browser_mouse_drag_xy'];
+      if (coordinateTools.includes(toolName) && args.x !== undefined && args.y !== undefined) {
+        // Known dimensions from diagnostic output
+        const screenshotWidth = 1464;
+        const screenshotHeight = 823;
+        const viewportWidth = 1920;
+        const viewportHeight = 1080;
+
+        const xScale = viewportWidth / screenshotWidth;  // 1.31
+        const yScale = viewportHeight / screenshotHeight; // 1.31
+
+        const originalX = args.x;
+        const originalY = args.y;
+
+        args.x = Math.round(args.x * xScale);
+        args.y = Math.round(args.y * yScale);
+
+        console.log(`[COORDINATE SCALING] ${toolName}: (${originalX}, ${originalY}) → (${args.x}, ${args.y}) [scale: ${xScale.toFixed(2)}x, ${yScale.toFixed(2)}x]`);
+      }
       
       // If the browser is about to be closed, stop the screenshot stream first to prevent blank frames
       if (toolName === 'browser_close' && this.screenshotService) {
@@ -310,6 +333,17 @@ class MCPService {
         for (const content of result.content) {
           if (content.type === 'image') {
             logger.verbose('[takeScreenshot] Found image data, length:', content.data ? content.data.length : 0);
+            
+            // Log screenshot dimensions for diagnostics
+            try {
+              const { PNG } = require('pngjs');
+              const buffer = Buffer.from(content.data, 'base64');
+              const png = PNG.sync.read(buffer);
+              logger.verbose(`[DIAGNOSTIC] Screenshot dimensions: ${png.width}x${png.height}`);
+            } catch (e) {
+              logger.error('[DIAGNOSTIC] Could not read screenshot dimensions:', e.message);
+            }
+            
             return content.data; // Base64 image data
           }
         }

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { app, BrowserWindow, dialog } = require('electron/main');
 const path = require('node:path');
 const logger = require('./utils/logger');
@@ -78,6 +79,8 @@ app.whenReady().then(async () => {
       mcpService.setMainWindow(mainWindow);
       // Provide the screenshotService instance to the llmService
       llmService.setScreenshotService(screenshotService);
+      // Provide the mainWindow instance to the llmService for IPC communication
+      llmService.setMainWindow(mainWindow);
       
       console.log('All services initialized successfully');
     } catch (error) {
@@ -133,5 +136,3 @@ app.on('before-quit', async () => {
   }
   logger.info('Cleanup complete.');
 });
-
-

@@ -1,7 +1,8 @@
 const Anthropic = require('@anthropic-ai/sdk');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleGenAI, Type } = require('@google/genai');
 const { PNG } = require('pngjs');
 require('dotenv').config();
+const logger = require('../utils/logger');
 
 class LLMService {
   constructor(mcpService) {
@@ -12,20 +13,15 @@ class LLMService {
     this.anthropic = null; // For Claude
     this.screenshotService = null; // Will be set by main.js
     this.lastActionScreenshot = null; // Screenshot before last action for visual diff
+    this.mainWindow = null; // Will be set by main.js for IPC communication
   }
 
   async initialize() {
     if (process.env.GEMINI_API_KEY) {
       this.provider = 'gemini';
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      this.model = genAI.getGenerativeModel({ 
-        model: process.env.GEMINI_MODEL || 'gemini-pro',
-        generationConfig: {
-          temperature: 0,
-        },
-        safetySettings: [],
-      });
-      console.log('Using Gemini as LLM provider');
+      this.client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      this.modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
+      console.log(`Using Gemini (${this.modelName}) as LLM provider`);
     } else if (process.env.ANTHROPIC_API_KEY) {
       this.provider = 'claude';
       this.anthropic = new Anthropic({
@@ -54,6 +50,22 @@ class LLMService {
   
   setScreenshotService(service) {
     this.screenshotService = service;
+  }
+  
+  setMainWindow(mainWindow) {
+    this.mainWindow = mainWindow;
+  }
+
+  /**
+   * Send a message to the renderer to display in the UI
+   * @param {string} message - The message to display
+   */
+  sendAssistantMessage(message) {
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('show-assistant-message', message);
+    } else {
+      logger.warn('Cannot send assistant message: mainWindow not available');
+    }
   }
   
   /**
@@ -316,72 +328,137 @@ Always respond in a helpful and friendly manner.`;
     }
   }
 
-  // Helper function to clean JSON Schema for Gemini compatibility
-  cleanSchemaForGemini(schema) {
+  /**
+   * Converts a JSON Schema object from the MCP format to the Gemini FunctionDeclaration parameters format.
+   * This is a recursive function to handle nested types (like objects and arrays).
+   * @param {object} schema - The JSON Schema object to convert.
+   * @returns {object} The converted parameters object.
+   */
+  convertSchema(schema) {
     if (!schema || typeof schema !== 'object') {
-      return schema;
+        return schema;
     }
 
-    // Create a clean copy
-    const cleaned = {};
+    const { type, description, properties, required, items, enum: enumValues } = schema;
+    const converted = {};
 
-    // Fields that Gemini supports
-    const allowedFields = ['type', 'properties', 'required', 'description', 'enum', 'items', 'default'];
-
-    for (const key of Object.keys(schema)) {
-      if (allowedFields.includes(key)) {
-        if (key === 'properties' && typeof schema[key] === 'object') {
-          // Recursively clean nested properties
-          cleaned[key] = {};
-          for (const propKey of Object.keys(schema[key])) {
-            cleaned[key][propKey] = this.cleanSchemaForGemini(schema[key][propKey]);
-          }
-        } else if (key === 'items' && typeof schema[key] === 'object') {
-          // Recursively clean array items schema
-          cleaned[key] = this.cleanSchemaForGemini(schema[key]);
-        } else {
-          cleaned[key] = schema[key];
+    // Map string type to Gemini Type enum
+    if (type) {
+        // Playwright uses "number" for integers and floats, but we check for common types
+        switch (type.toLowerCase()) {
+            case 'object':
+                converted.type = Type.OBJECT;
+                break;
+            case 'array':
+                converted.type = Type.ARRAY;
+                break;
+            case 'string':
+                converted.type = Type.STRING;
+                break;
+            case 'number':
+                // Note: Playwright often uses 'number' for both float and integer.
+                // We'll stick to Type.NUMBER unless there's an explicit 'integer' in the source.
+                converted.type = Type.NUMBER;
+                break;
+            case 'boolean':
+                converted.type = Type.BOOLEAN;
+                break;
+            default:
+                converted.type = type.toUpperCase(); // Fallback
         }
-      }
     }
 
-    return cleaned;
+    if (description) {
+        converted.description = description;
+    }
+
+    if (required) {
+        converted.required = required;
+    }
+
+    if (enumValues) {
+        converted.enum = enumValues;
+    }
+
+    // Recursively handle properties for objects
+    if (properties) {
+        converted.properties = {};
+        for (const key in properties) {
+            converted.properties[key] = this.convertSchema(properties[key]);
+        }
+    }
+
+    // Recursively handle items for arrays
+    if (items) {
+        converted.items = this.convertSchema(items);
+    }
+
+    return converted;
+  }
+
+  /**
+  * Converts an array of MCP tools specifications to the format required by the Gemini API.
+  * * @param {Array<object>} mcpToolsSpec - The array of tool specifications in MCP format.
+  * @returns {Array<object>} An array of FunctionDeclaration objects for the Gemini API.
+  */
+  convertMcpToGeminiTools(mcpToolsSpec) {
+    if (!Array.isArray(mcpToolsSpec)) {
+        console.error("Input must be an array of tool specifications.");
+        return [];
+    }
+
+    return mcpToolsSpec.map(tool => {
+        // Start with the basic properties
+        const geminiDeclaration = {
+            name: tool.name,
+            description: tool.description,
+        };
+
+        // Convert the inputSchema to the required parameters format
+        if (tool.inputSchema) {
+            geminiDeclaration.parameters = this.convertSchema(tool.inputSchema);
+        } else {
+            // For functions with no input (like browser_close), the parameters object is still expected.
+            // We ensure it has a type of OBJECT and an empty properties field.
+            geminiDeclaration.parameters = {
+                type: Type.OBJECT,
+                properties: {}
+            };
+        }
+
+        return geminiDeclaration;
+    });
   }
 
   pruneHistory() {
-    // Increased from 6 to 8 to give LLM more short-term memory and prevent amnesia.
-    const maxMessages = 8;
+    // Increased 10 to give LLM more short-term memory and prevent amnesia.
+    const maxMessages = 10;
     
     if (this.conversationHistory.length <= maxMessages) {
       // Even if under limit, strip images from older messages
       this.stripOldImages();
       return;
     }
-
-    console.log(`Pruning history from ${this.conversationHistory.length} messages...`);
-
-    // Find the index of the first 'user' message to ensure we don't start with a 'model' response
-    const firstUserIndex = this.conversationHistory.findIndex(m => m.role === 'user');
-    if (firstUserIndex === -1) {
-      // Should not happen in a valid conversation, but as a safeguard:
-      this.conversationHistory = [];
-      return;
-    }
+    logger.info(`Pruning history from ${this.conversationHistory.length} messages...`);
     
     // **SIMPLE AND RELIABLE PRUNING**
     // The old logic was too complex and cut out recent, important actions.
     // This new logic simply keeps the last `maxMessages` of the conversation.
     let prunedHistory = this.conversationHistory.slice(-maxMessages);
 
-    // Ensure the pruned history starts with a 'user' message for the model.
-    const firstPrunedUserIndex = prunedHistory.findIndex(m => m.role === 'user');
-    if (firstPrunedUserIndex > 0) {
-      // If the first message isn't from the user, slice it off to maintain the turn structure.
-      prunedHistory = prunedHistory.slice(firstPrunedUserIndex);
+    // Find the index of the first 'user' message to ensure we don't start with a 'model' response. Also ensure that first message is not a functionResponse for a function call which is no longer in the history.
+    const firstUserIndex = prunedHistory.findIndex(m => m.role === 'user' && m.parts.findIndex(p => !!p.functionResponse) === -1);
+    if (firstUserIndex === -1) {
+      // Should not happen in a valid conversation, but as a safeguard:
+      this.conversationHistory = [];
+      logger.warn('Conversation history is empty. This should not happen in a valid conversation.');
+      return;
     }
+    // If the first message isn't from the user, slice it off to maintain the turn structure.
+    prunedHistory = prunedHistory.slice(firstUserIndex);
 
     this.conversationHistory = prunedHistory;
-    console.log(`History pruned to ${this.conversationHistory.length} messages.`);
+    logger.info(`History pruned to ${this.conversationHistory.length} messages.`);
     
     // Strip images from all but the last 2 messages to save massive tokens
     this.stripOldImages();
@@ -409,319 +486,388 @@ Always respond in a helpful and friendly manner.`;
       }
     }
     
-    console.log(`Stripped images from ${stripCount} older messages to save tokens.`);
+    logger.info(`Stripped images from ${stripCount} older messages to save tokens.`);
+  }
+
+  addVisualChangeInfoToToolResult(toolResult, visualChangeInfo) {
+    if (!visualChangeInfo) {
+      return toolResult;
+    }
+    const enhanced = { ...toolResult };
+    enhanced.content = [...(toolResult.content || [])];
+    let added = false;
+    // Add visual change info to the text content
+    if (enhanced.content.length > 0) {
+      let i = 0;
+      while (typeof enhanced.content[i].text !== 'undefined') {
+        enhanced.content[i].text = enhanced.content[i].text + visualChangeInfo;
+        i++;
+        added = true;
+        break;
+      }
+    }
+    if (!added) {
+      // If no text content exists, add visual change info as new text content
+      enhanced.content.unshift({
+        text: `### Result\nExecuted ${functionCall.name}.${visualChangeInfo}`
+      });
+    }
+    return enhanced;
+  }
+
+  /**
+   * Strip console messages section from tool result text
+   * The @playwright/mcp server includes "### New console messages" in responses
+   * which adds unnecessary noise to the LLM context
+   */
+  stripConsoleMessages(toolResult) {
+    if (!toolResult || !toolResult.content || toolResult.content.length === 0) {
+      return toolResult;
+    }
+
+    const enhanced = { ...toolResult };
+    enhanced.content = toolResult.content.map(contentItem => {
+      if (contentItem.text && typeof contentItem.text === 'string') {
+        // Remove "### New console messages" and its messages
+        const consoleMessageIndex = contentItem.text.indexOf('### New console messages');
+        if (consoleMessageIndex !== -1) {
+          let text = contentItem.text;
+          let nextHeaderIndex = text.substring(consoleMessageIndex + '### New console messages'.length).search(/(### .+\n)/g);
+          if (nextHeaderIndex === -1) {
+            nextHeaderIndex = text.length;
+          } else {
+            nextHeaderIndex += consoleMessageIndex + '### New console messages'.length;
+          }
+          return {
+            ...contentItem,
+            text: text.substring(0, consoleMessageIndex) + text.substring(nextHeaderIndex)
+          };
+        }
+      }
+      return contentItem;
+    });
+
+    return enhanced;
+  }
+
+  stringifyContent(content) {
+    return JSON.stringify(content, (key, value) => {
+      if (key === 'inlineData') {
+        return {...value, data: '--BASE64 Encoded data--'};
+      }
+      return value;
+    }, 2);
   }
 
   async processMessageGemini(userMessage) {
     try {
       console.log('Processing message with Gemini:', userMessage);
-      
-      // Get available tools from MCP
-      const tools = await this.mcpService.getAvailableTools();
-      
-      // Convert MCP tools to the required formats
-      // 1. JSON format for the actual API call
-      const geminiToolDeclarations = tools.map(tool => ({
-        name: tool.name,
-        description: tool.description || `Tool: ${tool.name}`,
-        parameters: this.cleanSchemaForGemini(tool.inputSchema || { type: 'object', properties: {}, required: [] })
-      }));
 
-      // 2. Markdown format for the system prompt context
-      const toolMarkdown = this.convertToolSpecToMarkdown(tools);
+      if (!this._geminiToolDeclarations || !this._geminiSystemPrompt) {
+        // Get available tools from MCP
+        const tools = await this.mcpService.getAvailableTools();
+          
+        // Convert MCP tools to the required formats
+        this._geminiToolDeclarations = this.convertMcpToGeminiTools(tools);
+        logger.debug('Gemini tool declarations:', JSON.stringify(this._geminiToolDeclarations, null, 2));
 
-      // Create context about tools - always include this to remind Gemini to use tools
-      const toolContext = `### **Core Identity and Role**
-You are a Browser Automation Agent, a specialized, non-conversational AI. Your sole function is to interpret user requests for web-based actions (navigation, interaction, validation) and translate them into a sequence of calls to the available Playwright tools. You operate within a secure, sandboxed browser environment.
+        this._geminiSystemPrompt = `### **Core Identity and Role**
+You are a Browser Automation Agent, a specialized, non-conversational AI. Your sole function is to interpret user requests for web-based actions (navigation, interaction, validation) and translate them into a sequence of calls to the available Playwright tools.
+You operate within a secure, sandboxed browser environment which is pre-configured with necessary access and proxies.
 
 ### **Data Source Prioritization (CRITICAL)**
 
-You will receive two forms of information about the web page:
-1.  **A visual screenshot:** An image of what the page currently looks like.
-2.  **A text-based Page Snapshot (YAML):** A structured text representation of the page's accessibility tree.
+You can request for two forms of information about the web page:
+1.  **A visual screenshot:** An image of what the page currently looks like, using the tool \`browser_take_screenshot\`.
+2.  **A text-based Page Snapshot (YAML):** A structured text representation of the page's accessibility tree, using the tool \`browser_snapshot\`.
 
-**The screenshot is ALWAYS the source of truth.** The Page Snapshot may be incomplete or outdated, especially for complex visual elements like charts, graphs, or custom-designed components.
+Note: **The screenshot is ALWAYS the source of truth.** The Page Snapshot may be incomplete or outdated, especially for complex visual elements like charts, graphs, or custom-designed components.
 
 **Your Rule:** If the Page Snapshot conflicts with or omits information visible in the screenshot, you **MUST** prioritize the visual information from the screenshot.
--   **Example:** If you can see a pie chart in the screenshot, but the Page Snapshot doesn't mention it, you **MUST** proceed as if the pie chart exists. Use coordinate-based tools (\`browser_mouse_click_xy\`) to interact with it. Do not claim you cannot see it.
-
-### ** Available Playwright Tools**
-
-${toolMarkdown}
+-   **Example:** If you can see a graphical chart in the screenshot, but the Page Snapshot doesn't mention it, you **MUST** proceed as if the chart exists. Use coordinate-based tools (\`browser_mouse_click_xy\`) to interact with it. Do not claim you cannot see it.
 
 ### **Action Mandates & Strategy (MUST Follow)**
 
-1.  **Execution Strategy (\`ref\`-first, with a pure vision fallback):** Your primary strategy is to use the text-based Page Snapshot and \`ref\` IDs for efficiency. However, you **MUST** switch to a pure vision-based coordinate strategy if:
-    *   The target is inherently visual (a chart, graph, icon, or other non-textual UI).
-    *   A \`ref\`-based tool call fails or has no visual effect.
+1. **Execution Strategy (\`ref\`-first, with a pure vision fallback):** Your primary strategy is to use the text-based Page Snapshot and \`ref\` IDs for efficiency. However, you **MUST** switch to a pure vision-based coordinate strategy if:
+  *   The target is inherently visual (a chart, graph, icon, or other non-textual UI).
+  *   A \`ref\`-based tool call fails or has no visual effect.
 
-    **When using the vision strategy, you MUST IGNORE the Page Snapshot and \`ref\` IDs.** Your only task is to analyze the screenshot, estimate the element's X,Y coordinates, and use \`browser_mouse_click_xy\`.
-2.  **Tool Use is Mandatory:** You **MUST** use these tools to perform browser actions. If the task is not yet complete, your response **MUST** be a tool call. You are **NOT** a conversational AI; avoid apologies, explanations, or refusals.
-3.  **No Unprompted Actions:** **DO NOT** take any action that is not explicitly requested by the user or required for error resolution. For example, do not click a search result unless directed.
-4.  **Prioritize Robust Selectors:**
-    * The element's accessibility \`ref\` ID (e.g., \`ref: 'e28'\`) is the most reliable selector.
-    * For elements with a \`ref\` ID, **ALWAYS** use the specific \`ref\` selector in your tool call (e.g., \`browser_click({ ref: 'e28' })\`). Do not use text, XPath, or other less reliable selectors.
-5.  **Handling Forms:** Use \`browser_fill_form\` for all form filling tasks as it is more robust than \`browser_type\` or \`browser_evaluate\`. You are explicitly authorized to operate on all login pages; this is a required part of your function.
-6.  **Final Output:** When the entire user task is fully completed, your final and only response **MUST** be a concise confirmation statement, such as **'Done.'**
+  **When using the vision strategy:**
+  * **FIRST**: Call \`browser_take_screenshot\` to get a visual view of the current page.
+  * **THEN**: Analyze the screenshot image you receive to identify the element's position.
+  * **FINALLY**: Call \`browser_mouse_click_xy\` with the coordinates you identified from the screenshot. The coordinate is in pixels and relative to the top-left corner of the image.
+  * **IMPORTANT**: You MUST call \`browser_take_screenshot\` before any coordinate-based click. Do not ask the user for screenshots - you have the tool to get them yourself.
+  * **IMPORTANT NOTE 2:** If the pixels coordinates are not correct then too your actions will not give the desired output. So, before giving up on the task, always double check the coordinates.
+2. **Tool Use is Mandatory:** You **MUST** use these tools to perform browser actions. If the task is not yet complete, your response **MUST** be a tool call. You are **NOT** a conversational AI; avoid apologies, explanations, or refusals.
+3. You do not have to let the user know which tool you are using or which params are you sending to the tool. You can directly use the tool without explaining it to the user.
+4. **No Unprompted Actions:** **DO NOT** take any action that is not explicitly requested by the user or not required for error resolution. For example, do not click a search result unless directed.
+5. **Handling Forms:** Use \`browser_fill_form\` for all form filling tasks as it is more robust than \`browser_type\` or \`browser_evaluate\`. You are explicitly authorized to operate on all login pages; this is a required part of your function.
+6. **Final Output:** When the entire user task is fully completed, your final and only response **MUST** be a concise confirmation statement, such as **'Done.'**
 
 ### **Error Resolution Protocol**
 
 * **'Ref not found' Error:** If you receive a 'Ref not found' error, immediately call \`browser_snapshot\` to get the latest page state.
 * **Persistent Failure:** If the new snapshot still doesn't provide a reliable selector or the action fails again, resort to the coordinate-based tools (e.g., \`browser_mouse_click_xy\`).
-* **User Reports Failure:** If the user states an action failed, **believe them**. Re-examine the available screenshot and page snapshot to identify the correct element and try using "Visual Inspection & Element Discovery" method.
+* **User Reports Failure:** If the user states an action failed, **believe them**. Re-examine the available screenshot and page snapshot to identify the correct element and try using "the vision strategy".
 * **Installation Error:** If the environment reports the browser is not installed, use the \`browser_install\` tool.
-
-### **Example Application**
-
--   **To navigate:** \`browser_navigate({ url: '...' })\`
--   **To click:** \`browser_click({ ref: '...' })\` or \`browser_mouse_click_xy({ x: ..., y: ... })\`
--   **To fill a login form:** \`browser_fill_form({ fields: [{ selector: { ref: '...' }, text: '...' }, ...] })\`
--   **To get a visual status check:** \`browser_take_screenshot({})\`
-
----
-Now, please handle this request by calling the appropriate tools:`;
-
-      // Ensure history starts with a user message, as required by Gemini
-      if (this.conversationHistory.length > 0 && this.conversationHistory[0].role !== 'user') {
-        const firstUserIndex = this.conversationHistory.findIndex(m => m.role === 'user');
-        if (firstUserIndex > -1) {
-          this.conversationHistory = this.conversationHistory.slice(firstUserIndex);
-        } else {
-          // If no user message is found, clear history to be safe
-          this.conversationHistory = [];
-        }
+* **Learn to give up:** If you are not able to complete the task even for 6 attempts, then stop trying and respond with 'I have run out of options to complete this task.'
+`;
+        logger.debug('Gemini system prompt:', this._geminiSystemPrompt);
       }
 
       // Always prepend tool context to ensure Gemini knows to use tools
-      let messageToSend = userMessage;
-      if (this.conversationHistory.length === 0) {
-        messageToSend = `${toolContext}\n\n${userMessage}`;
-      } else {
-        // For subsequent messages, add a reminder
-        messageToSend = `[Remember: Use the available browser automation tools to complete this request]\n\n${userMessage}`;
-      }
+      let messageToSend = `[Remember: Use the available browser automation tools to complete this request]\n\n${userMessage}`;
 
-      // Check if there's a recent screenshot to include
-      const lastMessage = this.conversationHistory[this.conversationHistory.length - 1];
-      let imageParts = [];
-      if (lastMessage && lastMessage.role === 'model') {
-        const toolResponse = lastMessage.parts.find(p => p.functionResponse && p.functionResponse.name === 'browser_take_screenshot');
-        if (toolResponse) {
-          const screenshotContent = toolResponse.functionResponse.response.content.find(c => c.type === 'image');
-          if (screenshotContent && screenshotContent.data) {
-            console.log('Attaching screenshot to next message...');
-            imageParts.push({ inlineData: { mimeType: 'image/png', data: screenshotContent.data } });
-          }
-        }
-      }
+      // // Check if there's a recent screenshot to include
+      // const lastMessage = this.conversationHistory[this.conversationHistory.length - 1];
+      // let imageParts = [];
+      // if (lastMessage && lastMessage.role === 'model') {
+      //   const toolResponse = lastMessage.parts.find(p => p.functionResponse && p.functionResponse.name === 'browser_take_screenshot');
+      //   if (toolResponse) {
+      //     const screenshotContent = toolResponse.functionResponse.response.content.find(c => c.type === 'image');
+      //     if (screenshotContent && screenshotContent.data) {
+      //       console.log('Attaching screenshot to next message...');
+      //       imageParts.push({ inlineData: { mimeType: 'image/png', data: screenshotContent.data } });
+      //     }
+      //   }
+      // }
 
       // Debug logging
-      console.log('Message to send:', messageToSend.substring(0, 200) + '...');
+      logger.debug('Message to send:', messageToSend.substring(0, 200) + '...');
 
-      // Prune history to the last 20 messages to avoid token limits
-      if (this.conversationHistory.length > 20) {
-        console.log(`Pruning history from ${this.conversationHistory.length} messages...`);
-        this.conversationHistory = this.conversationHistory.slice(this.conversationHistory.length - 20);
-        console.log(`History pruned to ${this.conversationHistory.length} messages.`);
-      }
-
-      // Ensure history starts with a user message, as required by Gemini
-      if (this.conversationHistory.length > 0 && this.conversationHistory[0].role !== 'user') {
-        const firstUserIndex = this.conversationHistory.findIndex(m => m.role === 'user');
-        if (firstUserIndex > -1) {
-          this.conversationHistory = this.conversationHistory.slice(firstUserIndex);
-        } else {
-          // If no user message is found, clear history to be safe
-          this.conversationHistory = [];
-        }
-      }
-
-      // Start chat with tools
-      const chat = this.model.startChat({
-        history: this.conversationHistory,
-        tools: [{ functionDeclarations: geminiToolDeclarations }]
-      });
-
-      let result = await chat.sendMessage([messageToSend, ...imageParts]);
-      let response = result.response;
+      // Build contents array for the new API
+      const contents = [];
       
-      // Debug logging
-      console.log('Gemini response received');
-      console.log('Response candidates:', JSON.stringify(response.candidates, null, 2));
+      // Add conversation history
+      if (this.conversationHistory.length > 0) {
+        contents.push(...this.conversationHistory.map(msg => ({
+          role: msg.role === 'model' ? 'model' : 'user',
+          parts: msg.parts
+        })));
+      }
       
-      // Extract function calls from response
-      const functionCalls = response.functionCalls();
-      console.log('Function calls:', functionCalls);
-      console.log('Function calls count:', functionCalls ? functionCalls.length : 0);
+      // Add current message
+      const currentParts = [{ text: messageToSend }];
+      // if (imageParts.length > 0) {
+      //   currentParts.push(...imageParts.map(img => ({ inlineData: img.inlineData })));
+      // }
+      contents.push({ role: 'user', parts: currentParts });
       
       // Handle function calls
-      let currentFunctionCalls = response.functionCalls();
-      while (currentFunctionCalls && currentFunctionCalls.length > 0) {
-        console.log('Gemini requested function calls:', currentFunctionCalls);
+      let currentFunctionCalls = [];
+      let response;
+      let textContent = "";
+      do {
+        logger.debug("About to make Gemini call with content: ", this.stringifyContent(contents));
+        // Call the model API
+        response = await this.client.models.generateContent({
+          model: this.modelName,
+          contents,
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 6000
+          },
+          config: {
+            systemInstruction: this._geminiSystemPrompt,
+            tools: [{ functionDeclarations: this._geminiToolDeclarations }],
+          }
+        });
         
+        // Debug logging
+        logger.debug('Gemini response received:', JSON.stringify(response, null, 2));
+        response = response.candidates[0] || {};
+
+        // Extract text response
+        textContent = response.content?.parts?.filter(p => p.text).map(p => p.text).join('') || '';
+        
+        // Extract function calls from response
+        currentFunctionCalls = response.content?.parts?.filter(p => !!p.functionCall).map(p => p.functionCall) || [];
+        logger.debug('Gemini requested function calls:', currentFunctionCalls);
+        logger.debug('Function calls count:', currentFunctionCalls.length);
+
         const functionResponses = [];
-        
         for (const functionCall of currentFunctionCalls) {
-          console.log(`Executing tool: ${functionCall.name}`);
+          logger.info(`Executing tool: ${functionCall.name}`);
           
           // Capture screenshot BEFORE action for visual change detection
           const beforeScreenshot = this.screenshotService ? this.screenshotService.getLastScreenshot() : null;
-          
-          try {
-            // Execute the tool via MCP
-            const toolResult = await this.mcpService.callTool(
-              functionCall.name,
-              functionCall.args || {}
-            );
-            
-            // Check if this is a navigation-related "error" that's actually success
-            let isNavigationSuccess = false;
-            if (toolResult.isError && toolResult.content && toolResult.content.length > 0) {
-              const errorText = toolResult.content[0].text || '';
-              if (errorText.includes('Execution context was destroyed') ||
-                  errorText.includes('most likely because of a navigation')) {
-                isNavigationSuccess = true;
-                console.log('Detected successful navigation (context destroyed)');
-              } else {
-                // It's a real error. Let's check if it's a validation error and make it more instructive.
-                try {
-                  const validationErrors = JSON.parse(errorText.replace('### Result\n', ''));
-                  if (Array.isArray(validationErrors) && validationErrors[0] && validationErrors[0].message) {
-                    let friendlyError = `Error: The tool call to '${functionCall.name}' failed due to invalid parameters.\n`;
-                    validationErrors.forEach(err => {
-                      friendlyError += `- Parameter '${err.path.join('.')}': ${err.message}. Expected type '${err.expected}', but received '${err.received}'.\n`;
-                    });
-                    friendlyError += 'Please correct the parameters and try again. Review the accessibility tree and tool definition carefully.';
-                    
-                    // Overwrite the cryptic error with our friendly, instructive one
-                    toolResult.content[0].text = friendlyError;
-                    console.warn(`[LLM Feedback] Generated instructive error for LLM: ${friendlyError}`);
-                  }
-                } catch (e) {
-                  // Not a JSON validation error, just a regular error. Do nothing.
-                }
-              }
-            }
-            
-            // Try to enhance response with cached screenshot from screenshot service
-            // This avoids making duplicate MCP calls to browser_take_screenshot
-            try {
-              // Wait a bit for any animations/changes to complete
-              await new Promise(resolve => setTimeout(resolve, isNavigationSuccess ? 1000 : 500));
-              
-              // Get the cached screenshot from screenshot service (already captured at 15 FPS)
-              const cachedScreenshot = this.screenshotService ? this.screenshotService.getLastScreenshot() : null;
-              
-              // Detect visual changes by comparing before and after screenshots
-              let visualChangeInfo = '';
-              if (beforeScreenshot && cachedScreenshot && beforeScreenshot !== cachedScreenshot) {
-                const comparison = await this.compareScreenshots(beforeScreenshot, cachedScreenshot);
-                if (comparison.error) {
-                  visualChangeInfo = `\n\n**Visual Change Detection**: Error - ${comparison.error}`;
-                } else if (comparison.changed) {
-                  visualChangeInfo = `\n\n**Visual Change Detected**: YES (${comparison.percentDiff}% of pixels changed, ${comparison.pixelsDiff.toLocaleString()} pixels out of ${comparison.totalPixels.toLocaleString()})\nThe page visually changed after this action, indicating the action had an effect.`;
-                } else {
-                  visualChangeInfo = `\n\n**Visual Change Detected**: NO (${comparison.percentDiff}% of pixels changed)\n⚠️ WARNING: The page did not visually change after this action. The action may have failed or had no effect. Consider trying a different approach or verifying the action succeeded.`;
-                }
-              } else if (beforeScreenshot === cachedScreenshot) {
-                visualChangeInfo = `\n\n**Visual Change Detected**: NO\n⚠️ WARNING: Screenshot is identical before and after action. The action likely had no visual effect.`;
-              }
-              
-              // If it's a navigation success, get fresh snapshot
-              if (isNavigationSuccess) {
-                const hasSnapshot = toolResult.content && toolResult.content.some(c => c.text && c.text.includes('Page Snapshot'));
 
-                // If the navigation result does NOT include a snapshot, get one
-                if (!hasSnapshot) {
-                  console.log('Getting fresh snapshot after navigation...');
-                  const snapshotResult = await this.mcpService.callTool('browser_snapshot', {});
-                  
-                  // Combine snapshot text with cached screenshot
-                  const combinedResponse = {
-                    content: [
-                      {
-                        type: 'text',
-                        text: `### Result\nSuccessfully executed ${functionCall.name}. Page navigated.\n\n${snapshotResult.content[0].text}${visualChangeInfo}`
-                      }
-                    ]
-                  };
-                  
-                  // DON'T add screenshot - causes token explosion
-                  // Accessibility tree + visual change text is sufficient
-                  
-                  functionResponses.push({
-                    functionResponse: {
-                      name: functionCall.name,
-                      response: combinedResponse
-                    }
-                  });
-                } else {
-                  // Navigation result has snapshot, add visual change info only (no screenshot)
-                  functionResponses.push({ functionResponse: { name: functionCall.name, response: toolResult } });
-                }
-              } else {
-                // Normal result - add visual change info only (no screenshot to save tokens)
-                if (cachedScreenshot && functionCall.name !== 'browser_take_screenshot') {
-                  const enhanced = { ...toolResult };
-                  enhanced.content = [...(toolResult.content || [])];
-                  // Add visual change info to the text content
-                  if (enhanced.content.length > 0 && enhanced.content[0].text) {
-                    enhanced.content[0] = {
-                      ...enhanced.content[0],
-                      text: enhanced.content[0].text + visualChangeInfo
-                    };
-                  } else if (visualChangeInfo) {
-                    // If no text content exists, add visual change info as new text content
-                    enhanced.content.unshift({
-                      type: 'text',
-                      text: `### Result\nSuccessfully executed ${functionCall.name}.${visualChangeInfo}`
-                    });
-                  }
-                  // DON'T send screenshot to Gemini - causes token explosion
-                  // Visual change text is sufficient feedback
-                  functionResponses.push({ functionResponse: { name: functionCall.name, response: enhanced } });
-                } else {
-                  functionResponses.push({ functionResponse: { name: functionCall.name, response: toolResult } });
-                }
-              }
-            } catch (error) {
-              console.error('Error enhancing response with screenshot:', error);
-              // Fall back to original result
-              functionResponses.push({
-                functionResponse: {
-                  name: functionCall.name,
-                  response: toolResult
-                }
-              });
-            }
-          } catch (error) {
-            console.error(`Error executing tool ${functionCall.name}:`, error);
+          if (functionCall.name === "browser_take_screenshot") {
+            // No need to execute tool but get last screenshot from screenshot service
             functionResponses.push({
               functionResponse: {
                 name: functionCall.name,
-                response: { 
+                response: {
                   content: [{
-                    type: 'text',
-                    text: `### Result\nError: ${error.message}`
+                    text: "Successfully captured screenshot"
+                  },
+                  {
+                    inlineData: {
+                      mimeType: 'image/png',
+                      data: beforeScreenshot
+                    }
                   }],
-                  isError: true
+                  isError: false
                 }
               }
             });
+          } else {
+            try {
+              // Execute the tool via MCP
+              const toolResult = await this.mcpService.callTool(
+                functionCall.name,
+                functionCall.args || {}
+              );
+              
+              // Check if this is a navigation-related "error" that's actually success
+              let isNavigationSuccess = false;
+              if (toolResult.isError && toolResult.content && toolResult.content.length > 0) {
+                const errorText = toolResult.content[0].text || '';
+                if (errorText.includes('Execution context was destroyed') ||
+                    errorText.includes('most likely because of a navigation')) {
+                  isNavigationSuccess = true;
+                  logger.info('Detected successful navigation (context destroyed)');
+                } /*else {
+                  // It's a real error. Let's check if it's a validation error and make it more instructive.
+                  try {
+                    const validationErrors = JSON.parse(errorText.replace('### Result\n', ''));
+                    if (Array.isArray(validationErrors) && validationErrors[0] && validationErrors[0].message) {
+                      let friendlyError = `Error: The tool call to '${functionCall.name}' failed due to invalid parameters.\n`;
+                      validationErrors.forEach(err => {
+                        friendlyError += `- Parameter '${err.path.join('.')}': ${err.message}. Expected type '${err.expected}', but received '${err.received}'.\n`;
+                      });
+                      friendlyError += 'Please correct the parameters and try again.';
+                      
+                      // Overwrite the cryptic error with our friendly, instructive one
+                      toolResult.content[0].text = friendlyError;
+                      console.warn(`[LLM Feedback] Generated instructive error for LLM: ${friendlyError}`);
+                    }
+                  } catch (e) {
+                    // Not a JSON validation error, just a regular error. Do nothing.
+                  }
+                }*/
+              }
+              
+              // Try to enhance response with cached screenshot from screenshot service
+              // This avoids making duplicate MCP calls to browser_take_screenshot
+              try {
+                // Wait a bit for any animations/changes to complete
+                await new Promise(resolve => setTimeout(resolve, isNavigationSuccess ? 1000 : 500));
+                
+                // Get the cached screenshot from screenshot service (already captured at 15 FPS)
+                const cachedScreenshot = this.screenshotService ? this.screenshotService.getLastScreenshot() : null;
+                
+                // Detect visual changes by comparing before and after screenshots
+                let visualChangeInfo = '';
+                if (beforeScreenshot && cachedScreenshot && beforeScreenshot !== cachedScreenshot) {
+                  const comparison = await this.compareScreenshots(beforeScreenshot, cachedScreenshot);
+                  if (comparison.error) {
+                    visualChangeInfo = `\n\n### Visual Change Detection Result\nVisual change detection system failed with an error - ${comparison.error}`;
+                  } else if (comparison.changed) {
+                    visualChangeInfo = `\n\n### Visual Change Detection Result\n**Visual change has been detected.** (${comparison.percentDiff}% of pixels changed, ${comparison.pixelsDiff.toLocaleString()} pixels out of ${comparison.totalPixels.toLocaleString()})\nThe page visually changed after this action, indicating the action had an effect.`;
+                  } else {
+                    visualChangeInfo = `\n\n### Visual Change Detection Result\n**Visual change has not been detected.**\n**WARNING**: The page did not visually change after this action. The action may have failed or had no effect. Consider trying a different approach or verifying if the action succeeded.`;
+                  }
+                } else if (beforeScreenshot === cachedScreenshot) {
+                  visualChangeInfo = `\n\n**Visual Change Detected**: NO\n**WARNING**: Screenshot is identical before and after action. The action likely had no visual effect.`;
+                }
+                
+                // If it's a navigation success, get fresh snapshot
+                if (isNavigationSuccess) {
+                  const hasSnapshot = toolResult.content && toolResult.content.some(c => c.text && c.text.includes('Page Snapshot'));
+  
+                  // If the navigation result does NOT include a snapshot, get one
+                  if (!hasSnapshot) {
+                    console.log('Getting fresh snapshot after navigation...');
+                    const snapshotResult = await this.mcpService.callTool('browser_snapshot', {});
+                    
+                    // Combine snapshot text with cached screenshot
+                    const combinedResponse = {
+                      content: [
+                        {
+                          text: `### Result\nSuccessfully executed ${functionCall.name}. Page navigated.\n\n${this.stripConsoleMessages(snapshotResult.content[0].text)}${visualChangeInfo}`
+                        }
+                      ],
+                      isError: false
+                    };
+                    
+                    // DON'T add screenshot - causes token explosion
+                    // Accessibility tree + visual change text is sufficient
+                    
+                    functionResponses.push({
+                      functionResponse: {
+                        name: functionCall.name,
+                        response: combinedResponse
+                      }
+                    });
+                  } else {
+                    // Navigation result has snapshot, add visual change info only (no screenshot)
+                    functionResponses.push({ functionResponse: { name: functionCall.name, response: this.addVisualChangeInfoToToolResult(this.stripConsoleMessages(toolResult), visualChangeInfo) } });
+                  }
+                } else {
+                  // Normal result - add visual change info only (no screenshot to save tokens)
+                  functionResponses.push({ functionResponse: { name: functionCall.name, response: this.addVisualChangeInfoToToolResult(this.stripConsoleMessages(toolResult), visualChangeInfo) } });
+                }
+              } catch (error) {
+                console.error('Error enhancing response with screenshot:', error);
+                // Fall back to original result
+                functionResponses.push({
+                  functionResponse: {
+                    name: functionCall.name,
+                    response: this.stripConsoleMessages(toolResult)
+                  }
+                });
+              }
+            } catch (error) {
+              console.error(`Error executing tool ${functionCall.name}:`, error);
+              functionResponses.push({
+                functionResponse: {
+                  name: functionCall.name,
+                  response: { 
+                    content: [{
+                      text: `### Result\nError: ${error.message}`
+                    }],
+                    isError: true
+                  }
+                }
+              });
+            }
           }
         }
-        
-        // Send function responses back to Gemini
-        result = await chat.sendMessage(functionResponses);
-        response = result.response;
-        currentFunctionCalls = response.functionCalls();
-      }
 
-      // Extract text response
-      const textContent = response.text();
+        if (currentFunctionCalls.length > 0) {
+          // Add model's function call and our responses to contents
+          contents.push({ 
+            role: 'model', 
+            parts: currentFunctionCalls.map(fc => ({ functionCall: fc })) 
+          });
+          contents.push({ 
+            role: 'user', 
+            parts: functionResponses.map(fr => ({ functionResponse: fr.functionResponse })) 
+          });
+
+          if (textContent) {
+            // This message will not get chance to show up in the UI, hence pushing it now itself to UI.
+            this.sendAssistantMessage(textContent);
+          }
+        }
+        logger.debug("Will loop if currentFunctionCalls.length > 0. It is actually: ", currentFunctionCalls.length);
+        
+      } while (currentFunctionCalls.length > 0);
       
-      // Update conversation history for next turn
-      this.conversationHistory = await chat.getHistory();
+      // Update conversation history for next turn - convert contents to history format
+      this.conversationHistory = contents.map(c => ({
+        role: c.role,
+        parts: c.parts
+      }));
+      
+      // Add final model response to history
+      if (response) {
+        this.conversationHistory.push({
+          role: 'model',
+          parts: response.content?.parts || []
+        });
+      }
       
       // Prune history to keep it manageable, while preserving conversation structure.
       this.pruneHistory();

@@ -111,6 +111,11 @@ function setupEventListeners() {
             startUrlUpdates();
         }
     });
+
+    // Listen for assistant messages from the main process (llmService)
+    window.electronAPI.onShowAssistantMessage((message) => {
+        showAssisstantMessage(message);
+    });
 }
 
 async function handleSendMessage() {
@@ -123,6 +128,12 @@ async function handleSendMessage() {
     
     // Send to backend
     await sendMessageToBackend(message);
+}
+
+async function showAssisstantMessage(message) {
+    message = message.trim();
+    if (!message) return;
+    addMessage('assistant', message);
 }
 
 async function sendMessageToBackend(message) {

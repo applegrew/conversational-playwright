@@ -13,10 +13,7 @@ class Logger {
     const envLevel = (process.env.LOG_LEVEL || 'INFO').toUpperCase();
     this.level = LOG_LEVELS[envLevel] !== undefined ? LOG_LEVELS[envLevel] : LOG_LEVELS.INFO;
     
-    // Log the current log level on startup
-    if (this.level >= LOG_LEVELS.INFO) {
-      console.log(`[Logger] Log level set to: ${envLevel} (${this.level})`);
-    }
+    console.log(`[Logger] Log level set to: ${envLevel} (${this.level})`);
   }
 
   error(...args) {

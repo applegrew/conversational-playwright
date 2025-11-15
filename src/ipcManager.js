@@ -23,6 +23,16 @@ function initializeIpcHandlers(services) {
     }
   });
 
+  ipcMain.handle('show-assistant-message', async (event, message) => {
+    try {
+      mainWindow.webContents.send('show-assistant-message', message);
+      return { success: true };
+    } catch (error) {
+      logger.error('Error showing assistant message:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   ipcMain.handle('start-screenshot-stream', async (event) => {
     if (!screenshotService || !mainWindow) {
       logger.error('Screenshot service or main window not initialized');

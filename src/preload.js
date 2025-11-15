@@ -12,6 +12,7 @@ window.addEventListener('DOMContentLoaded', () => {
 })
 contextBridge.exposeInMainWorld('electronAPI', {
   sendMessage: (message) => ipcRenderer.invoke('send-message', message),
+  showAssistantMessage: (message) => ipcRenderer.invoke('show-assistant-message', message),
   startScreenshotStream: () => ipcRenderer.invoke('start-screenshot-stream'),
   stopScreenshotStream: () => ipcRenderer.invoke('stop-screenshot-stream'),
   getMCPTools: () => ipcRenderer.invoke('get-mcp-tools'),
