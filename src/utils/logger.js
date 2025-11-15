@@ -9,6 +9,7 @@ const LOG_LEVELS = {
 
 class Logger {
   constructor() {
+    this.LOG_LEVELS = LOG_LEVELS;
     // Get log level from environment variable, default to INFO
     const envLevel = (process.env.LOG_LEVEL || 'INFO').toUpperCase();
     this.level = LOG_LEVELS[envLevel] !== undefined ? LOG_LEVELS[envLevel] : LOG_LEVELS.INFO;
