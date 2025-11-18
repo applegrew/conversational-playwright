@@ -193,26 +193,31 @@ class MCPService {
       }
 
       // Scale coordinates for mouse-based tools
-      // Screenshots are captured at a different resolution (1464x823) than the viewport (1920x1080)
-      // We need to scale LLM-provided coordinates from screenshot space to viewport space
+      // LLM receives SCALED screenshots for token savings, so coordinates are based on scaled dimensions
+      // We need to scale LLM-provided coordinates from SCALED screenshot space to FULL viewport space
       const coordinateTools = ['browser_mouse_click_xy', 'browser_mouse_move_xy', 'browser_mouse_drag_xy'];
       if (coordinateTools.includes(toolName) && args.x !== undefined && args.y !== undefined) {
-        // Known dimensions from diagnostic output
-        const screenshotWidth = 1464;
-        const screenshotHeight = 823;
-        const viewportWidth = 1920;
-        const viewportHeight = 1080;
+        const screenshotData = this.screenshotService.getLastScreenshot();
+        if (screenshotData) {
+          // LLM sees SCALED screenshot, so coordinates are in scaled space
+          const scaledWidth = screenshotData.scaledWidth;
+          const scaledHeight = screenshotData.scaledHeight;
+          // Full screenshot matches viewport dimensions
+          const viewportWidth = screenshotData.width;
+          const viewportHeight = screenshotData.height;
 
-        const xScale = viewportWidth / screenshotWidth;  // 1.31
-        const yScale = viewportHeight / screenshotHeight; // 1.31
+          // Scale from scaled screenshot dimensions to full viewport dimensions
+          const xScale = viewportWidth / scaledWidth;
+          const yScale = viewportHeight / scaledHeight;
 
-        const originalX = args.x;
-        const originalY = args.y;
+          const originalX = args.x;
+          const originalY = args.y;
 
-        args.x = Math.round(args.x * xScale);
-        args.y = Math.round(args.y * yScale);
+          args.x = Math.round(args.x * xScale);
+          args.y = Math.round(args.y * yScale);
 
-        console.log(`[COORDINATE SCALING] ${toolName}: (${originalX}, ${originalY}) → (${args.x}, ${args.y}) [scale: ${xScale.toFixed(2)}x, ${yScale.toFixed(2)}x]`);
+          console.log(`[COORDINATE SCALING] ${toolName}: (${originalX}, ${originalY}) → (${args.x}, ${args.y}) [scaled ${scaledWidth}x${scaledHeight} → viewport ${viewportWidth}x${viewportHeight}, scale: ${xScale.toFixed(2)}x]`);
+        }
       }
       
       // If the browser is about to be closed, stop the screenshot stream first to prevent blank frames
