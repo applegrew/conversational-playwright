@@ -16,6 +16,7 @@ const streamStatusDot = document.getElementById('streamStatusDot');
 let messageHistory = [];
 let currentPageUrl = '';
 let urlUpdateInterval = null;
+let activeToolTiles = new Map(); // Track active tool execution tiles
 
 // FPS calculation state
 const fpsBuffer = [];
@@ -115,6 +116,22 @@ function setupEventListeners() {
     // Listen for assistant messages from the main process (llmService)
     window.electronAPI.onShowAssistantMessage((message) => {
         showAssisstantMessage(message);
+    });
+
+    // Listen for tool execution events
+    window.electronAPI.onToolExecutionStart((data) => {
+        console.log('[Renderer] Tool execution started:', data);
+        createToolTile(data);
+    });
+
+    window.electronAPI.onToolExecutionSuccess((data) => {
+        console.log('[Renderer] Tool execution success:', data);
+        updateToolTile(data.toolId, 'success', data);
+    });
+
+    window.electronAPI.onToolExecutionError((data) => {
+        console.log('[Renderer] Tool execution error:', data);
+        updateToolTile(data.toolId, 'error', data);
     });
 }
 
@@ -414,4 +431,158 @@ function updateStreamStatus(status, text) {
 function updateStatus(status, text) {
     statusDot.className = `status-dot ${status}`;
     statusText.textContent = text;
+}
+
+function createToolTile(data) {
+    const { toolId, toolName, args } = data;
+    
+    // Create tile container
+    const tile = document.createElement('div');
+    tile.id = `tool-tile-${toolId}`;
+    tile.className = 'tool-tile executing';
+    
+    // Create tile header with status indicator
+    const header = document.createElement('div');
+    header.className = 'tool-tile-header';
+    
+    const statusIndicator = document.createElement('span');
+    statusIndicator.className = 'tool-status-indicator executing';
+    statusIndicator.id = `tool-status-${toolId}`;
+    
+    const toolTitle = document.createElement('span');
+    toolTitle.className = 'tool-title';
+    toolTitle.textContent = formatToolName(toolName);
+    
+    header.appendChild(statusIndicator);
+    header.appendChild(toolTitle);
+    
+    // Create tile body with args
+    const body = document.createElement('div');
+    body.className = 'tool-tile-body';
+    body.id = `tool-body-${toolId}`;
+    
+    const argsDiv = document.createElement('div');
+    argsDiv.className = 'tool-args';
+    argsDiv.textContent = formatToolArgs(args);
+    
+    body.appendChild(argsDiv);
+    
+    // Create tile footer (initially hidden, shown on completion)
+    const footer = document.createElement('div');
+    footer.className = 'tool-tile-footer';
+    footer.id = `tool-footer-${toolId}`;
+    footer.style.display = 'none';
+    
+    tile.appendChild(header);
+    tile.appendChild(body);
+    tile.appendChild(footer);
+    
+    // Add to chat messages
+    chatMessages.appendChild(tile);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    
+    // Store reference
+    activeToolTiles.set(toolId, tile);
+}
+
+function updateToolTile(toolId, status, data) {
+    const tile = activeToolTiles.get(toolId);
+    if (!tile) {
+        console.warn('[Renderer] Tool tile not found:', toolId);
+        return;
+    }
+    
+    // Update tile class
+    tile.className = `tool-tile ${status}`;
+    
+    // Update status indicator
+    const statusIndicator = document.getElementById(`tool-status-${toolId}`);
+    if (statusIndicator) {
+        statusIndicator.className = `tool-status-indicator ${status}`;
+    }
+    
+    // Update footer with result/error
+    const footer = document.getElementById(`tool-footer-${toolId}`);
+    if (footer) {
+        footer.style.display = 'block';
+        
+        if (status === 'success') {
+            const duration = data.duration ? ` (${data.duration}ms)` : '';
+            footer.innerHTML = `<span class="tool-result-success">✓ Completed${duration}</span>`;
+            
+            // Add visual change info if available
+            if (data.visualChange !== undefined) {
+                const changeInfo = document.createElement('div');
+                changeInfo.className = 'tool-visual-change';
+                if (data.visualChange) {
+                    changeInfo.innerHTML = `<span class="visual-change-yes">✓ Visual change detected (${data.changePercent}%)</span>`;
+                } else {
+                    changeInfo.innerHTML = `<span class="visual-change-no">⚠ No visual change detected</span>`;
+                }
+                footer.appendChild(changeInfo);
+            }
+        } else if (status === 'error') {
+            footer.innerHTML = `<span class="tool-result-error">✗ Error: ${formatError(data.error)}</span>`;
+        }
+    }
+    
+    // Keep tiles visible permanently to provide complete execution history
+    // Tiles will only be removed when page is refreshed
+    // (Auto-removal disabled to prevent tiles from disappearing too quickly)
+}
+
+function formatToolName(toolName) {
+    // Convert snake_case or camelCase to Title Case
+    return toolName
+        .replace(/_/g, ' ')
+        .replace(/([A-Z])/g, ' $1')
+        .split(' ')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+        .join(' ')
+        .trim();
+}
+
+function formatToolArgs(args) {
+    if (!args || Object.keys(args).length === 0) {
+        return 'No arguments';
+    }
+    
+    // Format args for human readability
+    const formatted = Object.entries(args)
+        .filter(([key, value]) => value !== undefined && value !== null)
+        .map(([key, value]) => {
+            const formattedKey = key.replace(/_/g, ' ');
+            let formattedValue = value;
+            
+            // Truncate long strings
+            if (typeof value === 'string' && value.length > 100) {
+                formattedValue = value.substring(0, 100) + '...';
+            }
+            
+            // Format objects
+            if (typeof value === 'object') {
+                formattedValue = JSON.stringify(value, null, 2);
+                if (formattedValue.length > 100) {
+                    formattedValue = formattedValue.substring(0, 100) + '...';
+                }
+            }
+            
+            return `${formattedKey}: ${formattedValue}`;
+        })
+        .join(', ');
+    
+    return formatted || 'No arguments';
+}
+
+function formatError(error) {
+    if (typeof error === 'string') {
+        // Truncate long error messages
+        return error.length > 200 ? error.substring(0, 200) + '...' : error;
+    }
+    
+    if (error && error.message) {
+        return error.message.length > 200 ? error.message.substring(0, 200) + '...' : error.message;
+    }
+    
+    return 'Unknown error';
 }

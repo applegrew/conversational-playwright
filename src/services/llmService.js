@@ -56,6 +56,16 @@ class LLMService {
     this.mainWindow = mainWindow;
   }
 
+  generateToolId() {
+    return `tool-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  emitToolEvent(eventName, data) {
+    if (this.mainWindow && this.mainWindow.webContents) {
+      this.mainWindow.webContents.send(eventName, data);
+    }
+  }
+
   /**
    * Send a message to the renderer to display in the UI
    * @param {string} message - The message to display
@@ -763,6 +773,17 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
 
         const functionResponses = [];
         for (const functionCall of currentFunctionCalls) {
+          // Generate unique tool ID for tracking
+          const toolId = this.generateToolId();
+          const startTime = Date.now();
+          
+          // Emit tool execution start event
+          this.emitToolEvent('tool-execution-start', {
+            toolId,
+            toolName: functionCall.name,
+            args: functionCall.args || {}
+          });
+          
           logger.info(`Executing tool: ${functionCall.name}`);
           
           // Capture screenshot BEFORE action for visual change detection
@@ -816,7 +837,15 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
                     errorText.includes('most likely because of a navigation')) {
                   isNavigationSuccess = true;
                   logger.info('Detected successful navigation (context destroyed)');
-                } /*else {
+                } else {
+                  // Real error - emit error event
+                  this.emitToolEvent('tool-execution-error', {
+                    toolId,
+                    toolName: functionCall.name,
+                    error: errorText
+                  });
+                }
+                /*else {
                   // It's a real error. Let's check if it's a validation error and make it more instructive.
                   try {
                     const validationErrors = JSON.parse(errorText.replace('### Result\n', ''));
@@ -865,6 +894,17 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
                 } else if (beforeScreenshot === cachedScreenshotFull) {
                   visualChangeInfo = `\n\n**Visual Change Detected**: NO\n**WARNING**: Screenshot is identical before and after action. The action likely had no visual effect.`;
                 }
+                
+                // Emit tool execution success event
+                const duration = Date.now() - startTime;
+                const comparison = beforeScreenshot && cachedScreenshotFull ? await this.compareScreenshots(beforeScreenshot, cachedScreenshotFull) : null;
+                this.emitToolEvent('tool-execution-success', {
+                  toolId,
+                  toolName: functionCall.name,
+                  duration,
+                  visualChange: comparison ? comparison.changed : undefined,
+                  changePercent: comparison ? comparison.percentDiff.toFixed(2) : undefined
+                });
                 
                 // If it's a navigation success, get fresh snapshot
                 if (isNavigationSuccess) {
@@ -954,6 +994,14 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
               }
             } catch (error) {
               console.error(`Error executing tool ${functionCall.name}:`, error);
+              
+              // Emit tool execution error event
+              this.emitToolEvent('tool-execution-error', {
+                toolId,
+                toolName: functionCall.name,
+                error: error.message || error.toString()
+              });
+              
               functionResponses.push({
                 functionResponse: {
                   name: functionCall.name,

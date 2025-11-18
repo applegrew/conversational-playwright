@@ -29,5 +29,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onStreamStarted: (callback) => {
     ipcRenderer.on('stream-started', () => callback());
+  },
+  onToolExecutionStart: (callback) => {
+    ipcRenderer.on('tool-execution-start', (event, data) => callback(data));
+  },
+  onToolExecutionSuccess: (callback) => {
+    ipcRenderer.on('tool-execution-success', (event, data) => callback(data));
+  },
+  onToolExecutionError: (callback) => {
+    ipcRenderer.on('tool-execution-error', (event, data) => callback(data));
+  },
+  onShowAssistantMessage: (callback) => {
+    ipcRenderer.on('show-assistant-message', (event, message) => callback(message));
   }
 });
