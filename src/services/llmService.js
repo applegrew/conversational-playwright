@@ -809,6 +809,16 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
                 }
               }
             });
+            
+            // Emit success event for screenshot tool (short-circuited, no MCP call needed)
+            const duration = Date.now() - startTime;
+            this.emitToolEvent('tool-execution-success', {
+              toolId,
+              toolName: functionCall.name,
+              duration,
+              visualChange: undefined, // No visual change for screenshot capture
+              changePercent: undefined
+            });
           } else {
             try {
               // Special handling for coordinate-based clicks - set visual indicator
@@ -881,8 +891,12 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
                 const cachedScreenshotScaled = cachedScreenshotData ? cachedScreenshotData.scaled : null;
                 
                 // Detect visual changes by comparing before and after screenshots (use FULL resolution for accuracy)
+                // Skip visual change detection for read-only tools that don't perform actions
+                const readOnlyTools = ['browser_snapshot', 'browser_take_screenshot', 'browser_tabs', 'browser_console_messages', 'browser_network_requests'];
+                const shouldDetectVisualChange = !readOnlyTools.includes(functionCall.name);
+                
                 let visualChangeInfo = '';
-                if (beforeScreenshot && cachedScreenshotFull && beforeScreenshot !== cachedScreenshotFull) {
+                if (shouldDetectVisualChange && beforeScreenshot && cachedScreenshotFull && beforeScreenshot !== cachedScreenshotFull) {
                   const comparison = await this.compareScreenshots(beforeScreenshot, cachedScreenshotFull);
                   if (comparison.error) {
                     visualChangeInfo = `\n\n### Visual Change Detection Result\nVisual change detection system failed with an error - ${comparison.error}`;
@@ -891,13 +905,14 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
                   } else {
                     visualChangeInfo = `\n\n### Visual Change Detection Result\n**Visual change has not been detected.**\n**WARNING**: The page did not visually change after this action. The action may have failed or had no effect. Consider trying a different approach or verifying if the action succeeded.`;
                   }
-                } else if (beforeScreenshot === cachedScreenshotFull) {
+                } else if (shouldDetectVisualChange && beforeScreenshot === cachedScreenshotFull) {
                   visualChangeInfo = `\n\n**Visual Change Detected**: NO\n**WARNING**: Screenshot is identical before and after action. The action likely had no visual effect.`;
                 }
                 
                 // Emit tool execution success event
                 const duration = Date.now() - startTime;
-                const comparison = beforeScreenshot && cachedScreenshotFull ? await this.compareScreenshots(beforeScreenshot, cachedScreenshotFull) : null;
+                // Only calculate visual change comparison for action tools, not read-only tools
+                const comparison = shouldDetectVisualChange && beforeScreenshot && cachedScreenshotFull ? await this.compareScreenshots(beforeScreenshot, cachedScreenshotFull) : null;
                 this.emitToolEvent('tool-execution-success', {
                   toolId,
                   toolName: functionCall.name,
