@@ -112,6 +112,46 @@ function initializeIpcHandlers(services) {
       return { success: false, error: error.message };
     }
   });
+
+  ipcMain.handle('generate-playwright-script', async (event) => {
+    if (!llmService) {
+      return { success: false, error: 'LLM service not initialized' };
+    }
+    try {
+      logger.info('Generating Playwright script from action log...');
+      const script = await llmService.generatePlaywrightScript();
+      return { success: true, script };
+    } catch (error) {
+      logger.error('Error generating Playwright script:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('get-action-log', async (event) => {
+    if (!llmService) {
+      return { success: false, error: 'LLM service not initialized' };
+    }
+    try {
+      const actionLog = llmService.getActionLog();
+      return { success: true, actionLog };
+    } catch (error) {
+      logger.error('Error getting action log:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('clear-action-log', async (event) => {
+    if (!llmService) {
+      return { success: false, error: 'LLM service not initialized' };
+    }
+    try {
+      llmService.clearActionLog();
+      return { success: true };
+    } catch (error) {
+      logger.error('Error clearing action log:', error);
+      return { success: false, error: error.message };
+    }
+  });
 }
 
 module.exports = { initializeIpcHandlers };

@@ -2,6 +2,7 @@
 const chatMessages = document.getElementById('chatMessages');
 const chatInput = document.getElementById('chatInput');
 const sendButton = document.getElementById('sendButton');
+const downloadScriptButton = document.getElementById('downloadScriptButton');
 const screenshotImage = document.getElementById('screenshotImage');
 const canvasContent = document.getElementById('canvasContent');
 const urlDisplay = document.getElementById('urlDisplay');
@@ -81,6 +82,9 @@ function setupEventListeners() {
     // Send message on button click
     sendButton.addEventListener('click', handleSendMessage);
     
+    // Download Playwright script on button click
+    downloadScriptButton.addEventListener('click', handleDownloadScript);
+    
     // Send message on Enter (Shift+Enter for new line)
     chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -145,6 +149,68 @@ async function handleSendMessage() {
     
     // Send to backend
     await sendMessageToBackend(message);
+}
+
+async function handleDownloadScript() {
+    // Disable button while generating
+    downloadScriptButton.disabled = true;
+    downloadScriptButton.textContent = 'Generating...';
+    
+    try {
+        // Show status message
+        addMessage('system', '🔄 Generating Playwright test script from action log...');
+        
+        // Get action log first to check if there are any actions
+        const actionLogResult = await window.electronAPI.getActionLog();
+        
+        if (!actionLogResult.success) {
+            throw new Error(actionLogResult.error || 'Failed to retrieve action log');
+        }
+        
+        if (!actionLogResult.actionLog || actionLogResult.actionLog.length === 0) {
+            addMessage('system', '⚠️ No actions recorded yet. Please perform some browser automation first.');
+            return;
+        }
+        
+        logger.info('[Renderer] Action log:', JSON.stringify(actionLogResult.actionLog, null, 2));
+        
+        // Generate script
+        const result = await window.electronAPI.generatePlaywrightScript();
+        
+        if (result.success) {
+            // Create a blob from the script
+            const blob = new Blob([result.script], { type: 'text/typescript' });
+            const url = URL.createObjectURL(blob);
+            
+            // Create download link
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `playwright-test-${Date.now()}.spec.ts`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            addMessage('system', `✅ Playwright test script downloaded successfully! (${actionLogResult.actionLog.length} actions recorded)`);
+            console.log('[Renderer] Script generated:', result.script);
+        } else {
+            throw new Error(result.error || 'Failed to generate script');
+        }
+    } catch (error) {
+        console.error('[Renderer] Error downloading script:', error);
+        addMessage('system', `❌ Error: ${error.message}`);
+    } finally {
+        // Re-enable button
+        downloadScriptButton.disabled = false;
+        downloadScriptButton.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <polyline points="7 10 12 15 17 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <line x1="12" y1="15" x2="12" y2="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Download Script
+        `;
+    }
 }
 
 async function showAssisstantMessage(message) {

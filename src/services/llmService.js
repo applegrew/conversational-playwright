@@ -14,6 +14,7 @@ class LLMService {
     this.screenshotService = null; // Will be set by main.js
     this.lastActionScreenshot = null; // Screenshot before last action for visual diff
     this.mainWindow = null; // Will be set by main.js for IPC communication
+    this.actionLog = []; // Track all actions for Playwright script generation
   }
 
   async initialize() {
@@ -839,6 +840,14 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
                 functionCall.args || {}
               );
               
+              // Log action for Playwright script generation
+              this.actionLog.push({
+                timestamp: new Date().toISOString(),
+                toolName: functionCall.name,
+                args: functionCall.args || {},
+                success: !toolResult.isError
+              });
+              
               // Check if this is a navigation-related "error" that's actually success
               let isNavigationSuccess = false;
               if (toolResult.isError && toolResult.content && toolResult.content.length > 0) {
@@ -1088,6 +1097,101 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
 
   clearHistory() {
     this.conversationHistory = [];
+  }
+
+  getActionLog() {
+    return this.actionLog;
+  }
+
+  clearActionLog() {
+    this.actionLog = [];
+  }
+
+  /**
+   * Generate a Playwright test script from the action log
+   * @returns {Promise<string>} - The generated Playwright test script
+   */
+  async generatePlaywrightScript() {
+    if (this.provider !== 'gemini') {
+      throw new Error('Playwright script generation is only supported with Gemini provider');
+    }
+
+    if (this.actionLog.length === 0) {
+      throw new Error('No actions recorded. Please perform some browser automation first.');
+    }
+
+    // Create a prompt for Gemini to generate Playwright script
+    const prompt = `You are an expert Playwright test automation engineer. I will provide you with a log of browser automation actions that were performed. Your task is to generate a reliable, optimal, and executable Playwright test script that replicates these exact actions.
+
+**Requirements:**
+1. Generate a complete, runnable Playwright test script
+2. Use TypeScript syntax
+3. Include proper imports and test structure
+4. Add appropriate waits and assertions where needed
+5. Handle navigation, clicks, typing, and other actions
+6. Use best practices for selector stability (prefer role-based selectors over XPath when possible)
+7. Add comments explaining each major step
+8. Include error handling where appropriate
+9. The script should be executable with: npx playwright test
+10. Use Page Object Model pattern if the test is complex
+
+**Action Log (JSON):**
+\`\`\`json
+${JSON.stringify(this.actionLog, null, 2)}
+\`\`\`
+
+**Tool to Playwright Mapping:**
+- browser_navigate → await page.goto(url)
+- browser_click → await page.click(selector) or await page.locator(selector).click()
+- browser_mouse_click_xy → await page.mouse.click(x, y)
+- browser_type → await page.fill(selector, text) or await page.locator(selector).fill(text)
+- browser_press → await page.keyboard.press(key)
+- browser_select → await page.selectOption(selector, value)
+- browser_hover → await page.hover(selector)
+- browser_scroll → await page.evaluate(() => window.scrollBy(x, y))
+- browser_wait → await page.waitForTimeout(ms)
+
+**Important Notes:**
+- For clicks with 'ref' parameter, you'll need to convert them to appropriate selectors
+- For coordinate-based clicks (browser_mouse_click_xy), use page.mouse.click(x, y)
+- Add proper waiting strategies (waitForLoadState, waitForSelector) after navigation
+- Include a viewport size setup if coordinate clicks are used, like \`page.setViewportSize({ width: 1920, height: 1080 });\`
+- Add meaningful test name and description
+
+Please generate ONLY the Playwright test script code. Do not include any explanation or additional text outside the code block.`;
+
+    try {
+      logger.info('[Script Generation] Generating Playwright script from action log...');
+      
+      // Use Gemini to generate the script (without function calling)
+      const response = await this.client.models.generateContent({
+        model: this.modelName,
+        contents: [{
+          role: 'user',
+          parts: [{ text: prompt }]
+        }],
+        config: {
+          temperature: 0.3, // Low temperature for consistent code generation
+          maxOutputTokens: 8000 // Allow for longer scripts
+        }
+      });
+
+      const result = response.candidates[0];
+      const generatedText = result.content?.parts?.filter(p => p.text).map(p => p.text).join('') || '';
+      
+      // Extract code from markdown code blocks if present
+      let scriptCode = generatedText;
+      const codeBlockMatch = generatedText.match(/```(?:typescript|javascript)?\n([\s\S]*?)```/);
+      if (codeBlockMatch) {
+        scriptCode = codeBlockMatch[1];
+      }
+
+      logger.info('[Script Generation] Successfully generated Playwright script');
+      return scriptCode.trim();
+    } catch (error) {
+      logger.error('[Script Generation] Error generating Playwright script:', error);
+      throw new Error(`Failed to generate Playwright script: ${error.message}`);
+    }
   }
 }
 

@@ -18,6 +18,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getMCPTools: () => ipcRenderer.invoke('get-mcp-tools'),
   getLLMProvider: () => ipcRenderer.invoke('get-llm-provider'),
   getCurrentUrl: () => ipcRenderer.invoke('get-current-url'),
+  generatePlaywrightScript: () => ipcRenderer.invoke('generate-playwright-script'),
+  getActionLog: () => ipcRenderer.invoke('get-action-log'),
+  clearActionLog: () => ipcRenderer.invoke('clear-action-log'),
   onScreenshotUpdate: (callback) => {
     ipcRenderer.on('screenshot-update', (event, screenshot) => callback(screenshot));
   },
