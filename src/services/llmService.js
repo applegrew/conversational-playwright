@@ -621,9 +621,10 @@ You have access to three types of information about the web page:
     -   **You MUST take screenshots autonomously** by calling the \`browser_take_screenshot\` tool.
     -   **NEVER ask the user for a screenshot.**
     -   This is required for interacting with visual elements (charts, graphs, icons) and as a fallback when \`ref\`-based methods fail.
+    -   Fallback to this method of taking screenshot if the element the user is trying to interact with is not found in the "Page Snapshot".
 
-3.  **Visual Change Detection** - Automatic feedback after every action.
-    -   After each tool execution, you receive a visual change detection summary:
+3.  **Visual Change Detection** - Automatic feedback after most tool executions.
+    -   After most tool executions, you receive a visual change detection summary:
         -   **"Visual change detected..."** means your action had a visible effect.
         -   **"WARNING: NO visual change detected..."** means your action likely failed. **You MUST react to this warning** by trying a different approach.
 
@@ -634,6 +635,7 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
 1.  **Analyze the Request:**
     -   If the user's request involves standard elements (buttons, links, forms), start with the \`browser_snapshot\` to get \`ref\` IDs and use \`ref\`-based tools (\`browser_click\`, \`browser_type\`).
     -   If the user's request involves **visual attributes** (e.g., "the red button", "the chart on the left", "the icon that looks like a gear"), or if a \`ref\`-based action fails (indicated by a "NO visual change" warning), **you MUST start with \`browser_take_screenshot\`.**
+    -   If the element the user is trying to interact with is not found in the "Page Snapshot", fallback to using \`browser_take_screenshot\` to find the element.
 
 2.  **Execute the Action:**
     -   **For \`ref\`-based actions:** Use the \`ref\` ID with the appropriate tool.
