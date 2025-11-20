@@ -238,7 +238,7 @@ async function handleDownloadScript() {
             return;
         }
         
-        logger.info('[Renderer] Action log:', JSON.stringify(actionLogResult.actionLog, null, 2));
+        console.info('[Renderer] Action log:', JSON.stringify(actionLogResult.actionLog, null, 2));
         
         // Generate script
         const result = await window.electronAPI.generatePlaywrightScript();

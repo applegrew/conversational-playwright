@@ -892,25 +892,6 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
                     error: errorText
                   });
                 }
-                /*else {
-                  // It's a real error. Let's check if it's a validation error and make it more instructive.
-                  try {
-                    const validationErrors = JSON.parse(errorText.replace('### Result\n', ''));
-                    if (Array.isArray(validationErrors) && validationErrors[0] && validationErrors[0].message) {
-                      let friendlyError = `Error: The tool call to '${functionCall.name}' failed due to invalid parameters.\n`;
-                      validationErrors.forEach(err => {
-                        friendlyError += `- Parameter '${err.path.join('.')}': ${err.message}. Expected type '${err.expected}', but received '${err.received}'.\n`;
-                      });
-                      friendlyError += 'Please correct the parameters and try again.';
-                      
-                      // Overwrite the cryptic error with our friendly, instructive one
-                      toolResult.content[0].text = friendlyError;
-                      console.warn(`[LLM Feedback] Generated instructive error for LLM: ${friendlyError}`);
-                    }
-                  } catch (e) {
-                    // Not a JSON validation error, just a regular error. Do nothing.
-                  }
-                }*/
               }
               
               // Try to enhance response with cached screenshot from screenshot service
