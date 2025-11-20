@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   generatePlaywrightScript: () => ipcRenderer.invoke('generate-playwright-script'),
   getActionLog: () => ipcRenderer.invoke('get-action-log'),
   clearActionLog: () => ipcRenderer.invoke('clear-action-log'),
+  cancelExecution: () => ipcRenderer.invoke('cancel-execution'),
   onScreenshotUpdate: (callback) => {
     ipcRenderer.on('screenshot-update', (event, screenshot) => callback(screenshot));
   },

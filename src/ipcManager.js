@@ -23,6 +23,19 @@ function initializeIpcHandlers(services) {
     }
   });
 
+  ipcMain.handle('cancel-execution', async (event) => {
+    if (!llmService) {
+      return { success: false, error: 'LLM service not initialized' };
+    }
+    try {
+      llmService.cancelExecution();
+      return { success: true };
+    } catch (error) {
+      logger.error('Error cancelling execution:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   ipcMain.handle('show-assistant-message', async (event, message) => {
     try {
       mainWindow.webContents.send('show-assistant-message', message);

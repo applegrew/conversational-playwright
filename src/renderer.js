@@ -18,6 +18,8 @@ let messageHistory = [];
 let currentPageUrl = '';
 let urlUpdateInterval = null;
 let activeToolTiles = new Map(); // Track active tool execution tiles
+let isExecuting = false; // Track if LLM is currently executing
+let shouldCancelExecution = false; // Flag to signal cancellation
 
 // FPS calculation state
 const fpsBuffer = [];
@@ -79,8 +81,14 @@ async function initializeApp() {
 }
 
 function setupEventListeners() {
-    // Send message on button click
-    sendButton.addEventListener('click', handleSendMessage);
+    // Send or cancel message based on execution state
+    sendButton.addEventListener('click', () => {
+        if (isExecuting) {
+            handleCancelExecution();
+        } else {
+            handleSendMessage();
+        }
+    });
     
     // Download Playwright script on button click
     downloadScriptButton.addEventListener('click', handleDownloadScript);
@@ -89,7 +97,9 @@ function setupEventListeners() {
     chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            handleSendMessage();
+            if (!isExecuting) {
+                handleSendMessage();
+            }
         }
     });
     
@@ -137,6 +147,62 @@ function setupEventListeners() {
         console.log('[Renderer] Tool execution error:', data);
         updateToolTile(data.toolId, 'error', data);
     });
+}
+
+/**
+ * Switch send button to cancel button (red square)
+ */
+function showCancelButton() {
+    isExecuting = true;
+    sendButton.className = 'cancel-button';
+    sendButton.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="6" y="6" width="12" height="12" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        Stop
+    `;
+    chatInput.readOnly = true;
+    chatInput.classList.add('chat-input-readonly');
+}
+
+/**
+ * Switch cancel button back to send button
+ */
+function showSendButton() {
+    isExecuting = false;
+    shouldCancelExecution = false;
+    sendButton.className = 'send-button';
+    sendButton.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Send
+    `;
+    chatInput.readOnly = false;
+    chatInput.classList.remove('chat-input-readonly');
+}
+
+/**
+ * Handle cancel execution
+ */
+function handleCancelExecution() {
+    console.log('[Renderer] Cancelling execution...');
+    shouldCancelExecution = true;
+    
+    // Send cancel request to backend
+    window.electronAPI.cancelExecution().catch(err => {
+        console.error('[Renderer] Error cancelling execution:', err);
+    });
+    
+    // Update UI to show cancellation in progress
+    sendButton.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <rect x="6" y="6" width="12" height="12" fill="currentColor" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        Cancelling...
+    `;
+    sendButton.disabled = true;
 }
 
 async function handleSendMessage() {
@@ -220,9 +286,11 @@ async function showAssisstantMessage(message) {
 }
 
 async function sendMessageToBackend(message) {
-    // Disable input while processing
-    chatInput.disabled = true;
-    sendButton.disabled = true;
+    // Reset cancellation flag
+    shouldCancelExecution = false;
+    
+    // Show cancel button and make input readonly
+    showCancelButton();
     
     // Show loading indicator
     const loadingId = addLoadingMessage();
@@ -234,7 +302,10 @@ async function sendMessageToBackend(message) {
         // Remove loading indicator
         removeLoadingMessage(loadingId);
         
-        if (result.success) {
+        // Check if execution was cancelled
+        if (shouldCancelExecution) {
+            addMessage('system', '🛑 Execution cancelled by user');
+        } else if (result.success) {
             addMessage('assistant', result.response);
         } else {
             // Show user-friendly error with retry button
@@ -242,12 +313,19 @@ async function sendMessageToBackend(message) {
         }
     } catch (error) {
         removeLoadingMessage(loadingId);
-        // Show user-friendly error with retry button
-        addErrorMessage(error, message);
+        
+        // Check if this was a cancellation
+        if (shouldCancelExecution) {
+            addMessage('system', '🛑 Execution cancelled by user');
+        } else {
+            // Show user-friendly error with retry button
+            addErrorMessage(error, message);
+        }
     } finally {
-        // Re-enable input
-        chatInput.disabled = false;
+        // Restore send button and enable input
+        showSendButton();
         sendButton.disabled = false;
+        chatInput.disabled = false;
         chatInput.focus();
     }
 }

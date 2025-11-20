@@ -15,6 +15,7 @@ class LLMService {
     this.lastActionScreenshot = null; // Screenshot before last action for visual diff
     this.mainWindow = null; // Will be set by main.js for IPC communication
     this.actionLog = []; // Track all actions for Playwright script generation
+    this.cancelRequested = false; // Flag to cancel ongoing execution
   }
 
   async initialize() {
@@ -36,6 +37,9 @@ class LLMService {
   }
 
   async processMessage(userMessage) {
+    // Reset cancellation flag for new message
+    this.cancelRequested = false;
+    
     if (this.provider === 'gemini') {
       return await this.processMessageGemini(userMessage);
     } else if (this.provider === 'claude') {
@@ -55,6 +59,14 @@ class LLMService {
   
   setMainWindow(mainWindow) {
     this.mainWindow = mainWindow;
+  }
+
+  /**
+   * Cancel the ongoing LLM execution
+   */
+  cancelExecution() {
+    logger.info('[LLM Service] Cancellation requested');
+    this.cancelRequested = true;
   }
 
   generateToolId() {
@@ -744,6 +756,13 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
       let response;
       let textContent = "";
       do {
+        // Check for cancellation request
+        if (this.cancelRequested) {
+          logger.info('[LLM Service] Execution cancelled by user');
+          this.cancelRequested = false; // Reset flag
+          throw new Error('Execution cancelled by user');
+        }
+        
         if (logger.level >= logger.LOG_LEVELS.VERBOSE) {
           logger.verbose("About to make Gemini call with content: ", this.stringifyContent(contents));
         }
@@ -774,6 +793,13 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
 
         const functionResponses = [];
         for (const functionCall of currentFunctionCalls) {
+          // Check for cancellation request before processing each tool
+          if (this.cancelRequested) {
+            logger.info('[LLM Service] Execution cancelled by user during tool execution');
+            this.cancelRequested = false; // Reset flag
+            throw new Error('Execution cancelled by user');
+          }
+          
           // Generate unique tool ID for tracking
           const toolId = this.generateToolId();
           const startTime = Date.now();
