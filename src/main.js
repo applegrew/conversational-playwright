@@ -8,6 +8,7 @@ let mainWindow;
 let mcpService;
 let llmService;
 let screenshotService;
+let playbookService;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -40,6 +41,17 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // Parse command line arguments
+  const args = process.argv.slice(1); // Skip electron executable
+  let playbookPath = null;
+  
+  // Look for -p flag
+  const pIndex = args.indexOf('-p');
+  if (pIndex !== -1 && pIndex + 1 < args.length) {
+    playbookPath = args[pIndex + 1];
+    console.log(`[Main] Playbook mode: ${playbookPath}`);
+  }
+  
   // Start window creation and service initialization in parallel
   // They don't depend on each other, so this speeds up startup
   console.log('Starting parallel initialization...');
@@ -82,6 +94,14 @@ app.whenReady().then(async () => {
       // Provide the mainWindow instance to the llmService for IPC communication
       llmService.setMainWindow(mainWindow);
       
+      // Create playbook service if needed
+      if (playbookPath) {
+        console.log('Creating Playbook service...');
+        const PlaybookService = require('./services/playbookService');
+        playbookService = new PlaybookService(llmService, mainWindow);
+        console.log('Playbook service created');
+      }
+      
       console.log('All services initialized successfully');
     } catch (error) {
       console.error('Error initializing services:', error);
@@ -94,7 +114,7 @@ app.whenReady().then(async () => {
   await serviceInitialization;
 
   // Initialize IPC handlers now that all services are ready
-  initializeIpcHandlers({ llmService, mcpService, screenshotService, mainWindow });
+  initializeIpcHandlers({ llmService, mcpService, screenshotService, playbookService, mainWindow });
 
   // Notify the renderer that all services are ready
   if (mainWindow && mainWindow.webContents) {
@@ -110,6 +130,21 @@ app.whenReady().then(async () => {
       mainWindow.webContents.once('did-finish-load', sendServicesReady);
     } else {
       sendServicesReady();
+    }
+  }
+  
+  // Execute playbook if -p flag was provided
+  if (playbookPath && playbookService) {
+    logger.info(`[Main] Starting playbook execution: ${playbookPath}`);
+    try {
+      // Wait a moment for UI to be fully ready
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Execute the playbook
+      await playbookService.executePlaybook(playbookPath);
+      logger.info('[Main] Playbook execution completed');
+    } catch (error) {
+      logger.error('[Main] Playbook execution failed:', error);
     }
   }
 

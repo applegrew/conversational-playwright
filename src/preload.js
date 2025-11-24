@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getActionLog: () => ipcRenderer.invoke('get-action-log'),
   clearActionLog: () => ipcRenderer.invoke('clear-action-log'),
   cancelExecution: () => ipcRenderer.invoke('cancel-execution'),
+  getPlaybookStatus: () => ipcRenderer.invoke('get-playbook-status'),
   onScreenshotUpdate: (callback) => {
     ipcRenderer.on('screenshot-update', (event, screenshot) => callback(screenshot));
   },
@@ -45,5 +46,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   onShowAssistantMessage: (callback) => {
     ipcRenderer.on('show-assistant-message', (event, message) => callback(message));
+  },
+  onPlaybookMessage: (callback) => {
+    ipcRenderer.on('playbook-message', (event, data) => callback(data));
+  },
+  onPlaybookStarted: (callback) => {
+    ipcRenderer.on('playbook-started', () => callback());
+  },
+  onPlaybookCompleted: (callback) => {
+    ipcRenderer.on('playbook-completed', (event, data) => callback(data));
   }
 });

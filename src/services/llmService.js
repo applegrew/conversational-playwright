@@ -16,6 +16,7 @@ class LLMService {
     this.mainWindow = null; // Will be set by main.js for IPC communication
     this.actionLog = []; // Track all actions for Playwright script generation
     this.cancelRequested = false; // Flag to cancel ongoing execution
+    this.isExecuting = false; // Track if LLM is currently executing
   }
 
   async initialize() {
@@ -40,12 +41,22 @@ class LLMService {
     // Reset cancellation flag for new message
     this.cancelRequested = false;
     
-    if (this.provider === 'gemini') {
-      return await this.processMessageGemini(userMessage);
-    } else if (this.provider === 'claude') {
-      return await this.processMessageClaude(userMessage);
-    } else {
-      throw new Error('No active LLM provider to process message. Please set GEMINI_API_KEY or ANTHROPIC_API_KEY in .env');
+    try {
+      // Set executing flag
+      this.isExecuting = true;
+      logger.info('[LLM Service] Starting message processing');
+      
+      if (this.provider === 'gemini') {
+        return await this.processMessageGemini(userMessage);
+      } else if (this.provider === 'claude') {
+        return await this.processMessageClaude(userMessage);
+      } else {
+        throw new Error('No active LLM provider to process message. Please set GEMINI_API_KEY or ANTHROPIC_API_KEY in .env');
+      }
+    } finally {
+      // Always clear executing flag, even if error occurs
+      this.isExecuting = false;
+      logger.info('[LLM Service] Message processing completed');
     }
   }
 
@@ -148,81 +159,6 @@ class LLMService {
       console.error('Error comparing screenshots:', error.message);
       return { changed: false, percentDiff: 0, pixelsDiff: 0, error: error.message };
     }
-  }
-
-  convertToolSpecToMarkdown(toolSpec) {
-    let markdown = "";
-
-    toolSpec.forEach((tool, index) => {
-        const name = tool.name;
-        const title = tool.annotations?.title || name;
-        const description = tool.description;
-        const schema = tool.inputSchema;
-        const properties = schema?.properties;
-        const required = schema?.required || [];
-
-        // 1. Tool Heading
-        markdown += `## ${index + 1}. \`${name}\` - ${title}\n\n`;
-
-        // 2. Tool Description
-        markdown += `**Description:** ${description}\n\n`;
-
-        // 3. Parameters Section
-        if (properties && Object.keys(properties).length > 0) {
-            markdown += `### Parameters\n\n`;
-            markdown += `| Name | Type | Description | Required |\n`;
-            markdown += `| :--- | :--- | :--- | :---: |\n`;
-
-            for (const propName in properties) {
-                const prop = properties[propName];
-                const type = Array.isArray(prop.type) ? prop.type.join(' \\| ') : prop.type;
-                const isRequired = required.includes(propName) ? '✅ Yes' : 'No';
-                
-                // Handle nested structures for better readability (like 'browser_fill_form.fields')
-                let propDescription = prop.description || '';
-                
-                if (prop.items && prop.items.properties) {
-                    propDescription += ' (Array of objects)';
-                } else if (prop.enum) {
-                    propDescription += ` (Options: \`${prop.enum.join('`, `')}\`)`;
-                } else if (prop.default !== undefined) {
-                    propDescription += ` (Default: \`${prop.default}\`)`;
-                }
-                
-                // Handle complex array items for specific tools like browser_fill_form
-                if (name === 'browser_fill_form' && propName === 'fields') {
-                    propDescription = 'An array of form field objects to fill.';
-                    markdown += `| \`${propName}\` | \`array\` | ${propDescription} | ${isRequired} |\n`;
-
-                    const fieldProperties = prop.items.properties;
-                    markdown += `| **-- Field Object Properties --** | | | |\n`;
-                    
-                    const fieldRequired = prop.items.required || [];
-
-                    for (const fieldPropName in fieldProperties) {
-                        const fieldProp = fieldProperties[fieldPropName];
-                        const fieldType = Array.isArray(fieldProp.type) ? fieldProp.type.join(' \\| ') : fieldProp.type;
-                        const fieldIsRequired = fieldRequired.includes(fieldPropName) ? '✅ Yes' : 'No';
-                        
-                        let fieldPropDescription = fieldProp.description || '';
-                        if (fieldProp.enum) {
-                            fieldPropDescription += ` (Options: \`${fieldProp.enum.join('`, `')}\`)`;
-                        }
-
-                        markdown += `| &nbsp;&nbsp;&nbsp;&nbsp; \`${fieldPropName}\` | \`${fieldType}\` | ${fieldPropDescription} | ${fieldIsRequired} |\n`;
-                    }
-                    
-                } else {
-                     markdown += `| \`${propName}\` | \`${type}\` | ${propDescription} | ${isRequired} |\n`;
-                }
-            }
-        } else {
-            markdown += `This tool takes **no parameters**.\n`;
-        }
-        markdown += `\n---\n\n`;
-    });
-
-    return markdown;
   }
 
   async processMessageClaude(userMessage) {

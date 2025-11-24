@@ -6,7 +6,8 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev"
+    "dev": "electron . --dev",
+    "playbook": "electron . -p"
   },
   "keywords": [
     "electron",

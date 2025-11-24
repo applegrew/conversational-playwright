@@ -147,6 +147,42 @@ function setupEventListeners() {
         console.log('[Renderer] Tool execution error:', data);
         updateToolTile(data.toolId, 'error', data);
     });
+    
+    // Listen for playbook messages
+    window.electronAPI.onPlaybookMessage((data) => {
+        console.log('[Renderer] Playbook message:', data);
+        const { role, message } = data;
+        
+        if (role === 'user') {
+            // Display as user message
+            addMessage('user', message);
+        } else if (role === 'assistant') {
+            // Display as assistant message
+            addMessage('assistant', message);
+        } else if (role === 'system') {
+            // Display as system message
+            addMessage('system', message);
+        }
+    });
+    
+    // Listen for playbook execution start
+    window.electronAPI.onPlaybookStarted(() => {
+        console.log('[Renderer] Playbook execution started - disabling input');
+        chatInput.disabled = true;
+        chatInput.classList.add('chat-input-readonly');
+        chatInput.placeholder = 'Playbook running...';
+        sendButton.disabled = true;
+    });
+    
+    // Listen for playbook execution completion
+    window.electronAPI.onPlaybookCompleted((data) => {
+        console.log('[Renderer] Playbook execution completed:', data);
+        chatInput.disabled = false;
+        chatInput.classList.remove('chat-input-readonly');
+        chatInput.placeholder = 'Type your message here...';
+        sendButton.disabled = false;
+        chatInput.focus();
+    });
 }
 
 /**

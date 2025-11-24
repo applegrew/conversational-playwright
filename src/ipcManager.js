@@ -2,7 +2,7 @@ const { ipcMain } = require('electron/main');
 const logger = require('./utils/logger');
 
 function initializeIpcHandlers(services) {
-  const { llmService, mcpService, screenshotService, mainWindow } = services;
+  const { llmService, mcpService, screenshotService, playbookService, mainWindow } = services;
 
   // IPC Handlers
   ipcMain.handle('send-message', async (event, message) => {
@@ -162,6 +162,33 @@ function initializeIpcHandlers(services) {
       return { success: true };
     } catch (error) {
       logger.error('Error clearing action log:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('get-playbook-status', async (event) => {
+    if (!playbookService) {
+      return { success: true, status: null }; // No playbook service = not executing
+    }
+    try {
+      const status = playbookService.getStatus();
+      return { success: true, status };
+    } catch (error) {
+      logger.error('Error getting playbook status:', error);
+      return { success: false, error: error.message };
+    }
+  });
+  
+  ipcMain.handle('is-llm-executing', async (event) => {
+    if (!llmService) {
+      return { success: true, isExecuting: false };
+    }
+    try {
+      // Check if LLM service has an isExecuting property or method
+      const isExecuting = llmService.isExecuting || false;
+      return { success: true, isExecuting };
+    } catch (error) {
+      logger.error('Error checking LLM execution status:', error);
       return { success: false, error: error.message };
     }
   });

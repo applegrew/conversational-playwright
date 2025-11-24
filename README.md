@@ -74,6 +74,52 @@ npm start
    - "Type 'hello world' in the search box"
    - "Take a screenshot"
 
+## Playbook Mode
+
+You can automate sequences of browser actions by providing a markdown file with steps:
+
+```bash
+npm run playbook example-playbook.md
+```
+
+Or with the full command:
+```bash
+npm start -- -p path/to/your-playbook.md
+```
+
+### Features
+- **Sequential Execution**: Each step executes one at a time, waiting for completion
+- **UI Integration**: Steps appear in the chat UI as if entered manually
+- **Visual Feedback**: See real-time tool execution and responses
+- **Error Handling**: Execution stops on errors with clear feedback
+
+### Markdown Format
+
+Supports multiple formats:
+
+**Numbered lists:**
+```markdown
+1. Navigate to https://www.google.com
+2. Type "playwright" in the search box
+3. Click the search button
+```
+
+**Bullet points:**
+```markdown
+- Navigate to https://www.example.com
+- Click on the login button
+- Enter username "test@example.com"
+```
+
+**Plain text:**
+```markdown
+Navigate to https://www.google.com
+Search for "automation testing"
+Click on the first result
+```
+
+See `example-playbook.md` for a complete example and `PLAYBOOK.md` for detailed documentation.
+
 ## Architecture
 
 ### Frontend (Renderer Process)
