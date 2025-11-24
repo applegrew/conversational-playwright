@@ -18,9 +18,9 @@ npx electron src/main.js -p path/to/playbook.md
 
 ## Markdown Format
 
-The playbook parser supports multiple formats for defining steps:
+The playbook parser supports two formats for defining steps:
 
-### 1. Numbered Lists
+### 1. Numbered Lists (Recommended)
 
 ```markdown
 1. Navigate to https://www.google.com
@@ -38,15 +38,7 @@ The playbook parser supports multiple formats for defining steps:
 
 Both `-` and `*` bullet points are supported.
 
-### 3. Plain Text Lines
-
-Any non-empty line that is not a heading or horizontal rule will be treated as a step:
-
-```markdown
-Navigate to https://www.google.com
-Search for "automation testing"
-Click on the first result
-```
+**Note**: Only numbered lists and bullet points are treated as steps. Plain text lines, headings, and descriptions are ignored. This prevents confusion from sending non-step content to the LLM.
 
 ## Features
 
@@ -66,7 +58,8 @@ The parser automatically ignores:
 - Empty lines
 - Markdown headings (lines starting with `#`)
 - Horizontal rules (`---`, `***`, `___`)
-- Very short lines (< 3 characters)
+- Plain text lines (descriptions, titles, etc.)
+- Any line that isn't a numbered list item or bullet point
 
 ## Use Cases
 

@@ -95,9 +95,9 @@ npm start -- -p path/to/your-playbook.md
 
 ### Markdown Format
 
-Supports multiple formats:
+Supports two formats for defining steps:
 
-**Numbered lists:**
+**Numbered lists (recommended):**
 ```markdown
 1. Navigate to https://www.google.com
 2. Type "playwright" in the search box
@@ -111,12 +111,7 @@ Supports multiple formats:
 - Enter username "test@example.com"
 ```
 
-**Plain text:**
-```markdown
-Navigate to https://www.google.com
-Search for "automation testing"
-Click on the first result
-```
+**Note**: Only numbered lists and bullet points are treated as steps. Plain text lines, headings, and descriptions are automatically ignored to prevent confusing the LLM.
 
 See `example-playbook.md` for a complete example and `PLAYBOOK.md` for detailed documentation.
 

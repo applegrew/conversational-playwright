@@ -56,10 +56,8 @@ class PlaybookService {
         continue;
       }
       
-      // Regular line (if not too short)
-      if (trimmed.length > 3) {
-        steps.push(trimmed);
-      }
+      // Skip any other text (descriptions, titles, etc.)
+      // Only numbered lists and bullet points are treated as steps
     }
 
     logger.info(`[Playbook] Parsed ${steps.length} steps from markdown file`);

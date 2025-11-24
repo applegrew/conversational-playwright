@@ -108,7 +108,7 @@ class LLMService {
    * @param {string} afterBase64 - Base64 encoded PNG screenshot after action
    * @returns {object} - { changed: boolean, percentDiff: number, pixelsDiff: number }
    */
-  async compareScreenshots(beforeBase64, afterBase64) {
+  async compareScreenshots(beforeBase64, afterBase64, toolName = null) {
     try {
       if (!beforeBase64 || !afterBase64) {
         return { changed: false, percentDiff: 0, pixelsDiff: 0, error: 'Missing screenshots' };
@@ -146,8 +146,13 @@ class LLMService {
       const totalPixels = width * height;
       const percentDiff = (numDiffPixels / totalPixels * 100).toFixed(2);
       
-      // Consider changed if more than 0.5% of pixels differ
-      const changed = percentDiff > 0.5;
+      // Use lower threshold for form-filling tools as they have subtle changes
+      // Form fields with light text or password dots may show minimal pixel differences
+      const isFormTool = toolName && ['browser_fill_form', 'browser_type'].includes(toolName);
+      const changeThreshold = isFormTool ? 0.1 : 0.5; // 0.1% for forms, 0.5% for others
+      
+      // Consider changed if more than threshold of pixels differ
+      const changed = percentDiff > changeThreshold;
       
       return {
         changed,
@@ -538,7 +543,7 @@ Always respond in a helpful and friendly manner.`;
         logger.verbose('Gemini tool declarations:', JSON.stringify(this._geminiToolDeclarations, null, 2));
 
         this._geminiSystemPrompt = `### **Core Identity and Role**
-You are an AI Assistant with Browser Automation capabilities. Your primary function is to help users by:
+You are a helpful AI Assistant with Browser Automation capabilities. Your primary function is to help users by:
 1. **Answering general questions** - You can engage in normal conversation and answer knowledge questions
 2. **Automating browser tasks** - When users request web-based actions (navigation, interaction, validation), you use the available Playwright tools
 
@@ -570,8 +575,7 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
 
 1.  **Analyze the Request:**
     -   If the user's request involves standard elements (buttons, links, forms), start with the \`browser_snapshot\` to get \`ref\` IDs and use \`ref\`-based tools (\`browser_click\`, \`browser_type\`).
-    -   If the user's request involves **visual attributes** (e.g., "the red button", "the chart on the left", "the icon that looks like a gear"), or if a \`ref\`-based action fails (indicated by a "NO visual change" warning), **you MUST start with \`browser_take_screenshot\`.**
-    -   If the element the user is trying to interact with is not found in the "Page Snapshot", fallback to using \`browser_take_screenshot\` to find the element.
+    -   If the user's request involves **visual attributes** (e.g., "the red button", "the chart on the left", "the icon that looks like a gear"), or if a \`ref\`-based action fails (indicated by a "NO visual change" warning), or if the element the user is trying to interact with is not found in the "Page Snapshot", **you MUST start with \`browser_take_screenshot\`.**
 
 2.  **Execute the Action:**
     -   **For \`ref\`-based actions:** Use the \`ref\` ID with the appropriate tool.
@@ -587,49 +591,42 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
 
 **Important Notes:**
 - **YOU MUST take screenshots yourself** - NEVER ask the user to provide them
-- After using \`browser_take_screenshot\`, you must invoke one of the mouse based tools like \`browser_mouse_click_xy\`, etc.
+- After using \`browser_take_screenshot\`, you must follow it up with one of the mouse based tools like \`browser_mouse_click_xy\`, etc.
 - Coordinates must be precise - if wrong, action won't work as intended
 - Always verify coordinates from red dot feedback before giving up
 - If element not in Page Snapshot but user mentions it, trust user and use vision strategy
 
 ### **Action Mandates**
 
-1.  **CRITICAL: Screenshot Autonomy is NON-NEGOTIABLE.**
-    -   **NEVER ask the user for screenshots or visual information.**
-    -   **ALWAYS use the \`browser_take_screenshot\` tool yourself** when you need to see the page.
-    -   A call to \`browser_mouse_click_xy\` **MUST** be immediately preceded by a call to \`browser_take_screenshot\`.
-
-2.  **Choose Response Type Appropriately:**
+1.  **Choose Response Type Appropriately:**
     -   **General questions** (e.g., "What is a pie chart?"): Answer conversationally without tools.
     -   **Browser automation requests** (e.g., "Click the button"): Use tools and do not narrate your actions.
-   
-3. **Tool Use for Automation:** When user requests browser actions, you **MUST** use these tools. If automation task is not complete, your response **MUST** be a tool call.
 
-4. **Silent Operation:** During automation, do not explain which tools you're using or what parameters you're sending. Execute actions directly without narration.
+2. **Tool Use for Automation:** When user requests browser actions, you **MUST** use these tools. If automation task is not complete, your response **MUST** be a tool call.
 
-5. **No Unprompted Actions:** **DO NOT** take actions not explicitly requested by user or required for error resolution. Example: Don't click search results unless directed.
+3. **Silent Operation:** During automation, do not explain which tools you're using or what parameters you're sending. Execute actions directly without narration.
 
-6. **Form Handling:** Use \`browser_fill_form\` for form filling - it's more robust than \`browser_type\` or \`browser_evaluate\`. You are explicitly authorized to operate on all login pages as required.
+4. **No Unprompted Actions:** **DO NOT** take actions not explicitly requested by user or required for error resolution. Example: Don't click search results unless directed.
 
-7. **Final Output:** When user's automation task is fully completed, respond with a concise confirmation: **"Done."**
+5. **Form Handling:** Use \`browser_fill_form\` for form filling - it's more robust than \`browser_type\` or \`browser_evaluate\`. You are explicitly authorized to operate on all login pages as required.
 
-7. **Trust Visual Change Feedback:** If feedback shows "NO visual change", the action likely failed even if no error was reported. Try different approach immediately.
+6. **Final Output:** When user's automation task is fully completed, respond with a concise confirmation: **"Done."**
 
 ### **Error Resolution Protocol**
 
 - **"Ref not found" Error:** 
   1. Call \`browser_snapshot\` to get latest page state with updated refs
-  2. If still failing, switch to vision strategy with coordinates
+  2. If still failing, switch to vision-based actions with coordinates
 
 - **No Visual Change After Action:**
   1. Action likely failed silently
   2. Try alternative selector/ref in Page Snapshot
-  3. If still failing, switch to vision strategy
+  3. If still failing, switch to vision-based actions
 
 - **User Reports Failure:** 
   - **Believe them immediately**
   - Re-examine Page Snapshot and request screenshot
-  - Try vision strategy with coordinates
+  - Try vision-based actions with coordinates
 
 - **Coordinate Click Misses Target:**
   1. Look at red dot indicator in returned screenshot
@@ -644,9 +641,10 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
 
 - Page Snapshot (refs) = Primary efficient method
 - Screenshots (vision) = Fallback for visual elements or failures  
-- Visual Change Detection = Your success/failure indicator - trust it!
-- Red Dot Feedback = Coordinate accuracy verification
+- Visual Change Detection = Your success/failure indicator
+- Red Dot Feedback = Coordinate accuracy verification when using vision-based actions
 - Switch strategies quickly when visual change shows no effect
+
 `;
         logger.debug('Gemini system prompt:', this._geminiSystemPrompt);
       }
@@ -712,7 +710,7 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
             systemInstruction: this._geminiSystemPrompt,
             tools: [{ functionDeclarations: this._geminiToolDeclarations }],
             seed: 42,
-            temperature: 0.01,
+            temperature: 0,
             maxOutputTokens: 6000
           }
         });
@@ -833,9 +831,22 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
               // Try to enhance response with cached screenshot from screenshot service
               // This avoids making duplicate MCP calls to browser_take_screenshot
               try {
-                // For coordinate-based clicks, wait a bit longer to ensure red dot is drawn
+                // Different wait times based on tool type to ensure visual changes are captured
                 const isCoordinateClick = functionCall.name === 'browser_mouse_click_xy';
-                const waitTime = isNavigationSuccess ? 1000 : (isCoordinateClick ? 800 : 500);
+                const isFormFilling = ['browser_fill_form', 'browser_type'].includes(functionCall.name);
+                
+                let waitTime;
+                if (isNavigationSuccess) {
+                  waitTime = 1000; // Navigation needs time for page load
+                } else if (isFormFilling) {
+                  waitTime = 1000; // Form fields need time to render text and animations
+                } else if (isCoordinateClick) {
+                  waitTime = 800; // Coordinate clicks need time for red dot to be drawn
+                } else {
+                  waitTime = 500; // Default wait time for other actions
+                }
+                
+                logger.info(`[Visual Change] Waiting ${waitTime}ms for visual changes to render after ${functionCall.name}`);
                 await new Promise(resolve => setTimeout(resolve, waitTime));
                 
                 // Get the cached screenshot from screenshot service (already captured at 15 FPS)
@@ -851,22 +862,31 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
                 
                 let visualChangeInfo = '';
                 if (shouldDetectVisualChange && beforeScreenshot && cachedScreenshotFull && beforeScreenshot !== cachedScreenshotFull) {
-                  const comparison = await this.compareScreenshots(beforeScreenshot, cachedScreenshotFull);
+                  const comparison = await this.compareScreenshots(beforeScreenshot, cachedScreenshotFull, functionCall.name);
+                  logger.info(`[Visual Change] Tool: ${functionCall.name}, Changed: ${comparison.changed}, Percent: ${comparison.percentDiff}%, Pixels: ${comparison.pixelsDiff}/${comparison.totalPixels}`);
+                  
                   if (comparison.error) {
                     visualChangeInfo = `\n\n### Visual Change Detection Result\nVisual change detection system failed with an error - ${comparison.error}`;
                   } else if (comparison.changed) {
                     visualChangeInfo = `\n\n### Visual Change Detection Result\n**Visual change has been detected.** (${comparison.percentDiff}% of pixels changed, ${comparison.pixelsDiff.toLocaleString()} pixels out of ${comparison.totalPixels.toLocaleString()})\nThe page visually changed after this action, indicating the action had an effect.`;
                   } else {
-                    visualChangeInfo = `\n\n### Visual Change Detection Result\n**Visual change has not been detected.**\n**WARNING**: The page did not visually change after this action. The action may have failed or had no effect. Consider trying a different approach or verifying if the action succeeded.`;
+                    // For form filling tools, provide more context
+                    const threshold = isFormFilling ? '0.1%' : '0.5%';
+                    if (isFormFilling) {
+                      visualChangeInfo = `\n\n### Visual Change Detection Result\n**Visual change has not been detected.** (${comparison.percentDiff}% of pixels changed, threshold is ${threshold})\n**Note**: Form fields may have subtle visual changes. If you can see text in the screenshot, the form was likely filled successfully even if visual change detection shows minimal difference.`;
+                    } else {
+                      visualChangeInfo = `\n\n### Visual Change Detection Result\n**Visual change has not been detected.** (${comparison.percentDiff}% of pixels changed, threshold is ${threshold})\n**WARNING**: The page did not visually change after this action. The action may have failed or had no effect. Consider trying a different approach or verifying if the action succeeded.`;
+                    }
                   }
                 } else if (shouldDetectVisualChange && beforeScreenshot === cachedScreenshotFull) {
+                  logger.warn(`[Visual Change] Screenshot identical before and after ${functionCall.name}`);
                   visualChangeInfo = `\n\n**Visual Change Detected**: NO\n**WARNING**: Screenshot is identical before and after action. The action likely had no visual effect.`;
                 }
                 
                 // Emit tool execution success event
                 const duration = Date.now() - startTime;
                 // Only calculate visual change comparison for action tools, not read-only tools
-                const comparison = shouldDetectVisualChange && beforeScreenshot && cachedScreenshotFull ? await this.compareScreenshots(beforeScreenshot, cachedScreenshotFull) : null;
+                const comparison = shouldDetectVisualChange && beforeScreenshot && cachedScreenshotFull ? await this.compareScreenshots(beforeScreenshot, cachedScreenshotFull, functionCall.name) : null;
                 this.emitToolEvent('tool-execution-success', {
                   toolId,
                   toolName: functionCall.name,
