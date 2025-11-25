@@ -105,6 +105,7 @@ function setupEventListeners() {
     
     // Listen for screenshot updates
     window.electronAPI.onScreenshotUpdate((screenshot) => {
+        console.log('[Renderer] Screenshot update received:', screenshot ? `${screenshot.length} bytes` : 'null');
         updateScreenshot(screenshot);
         updateFPS();
         updateStreamStatus('live');
@@ -608,8 +609,10 @@ function removeLoadingMessage(loadingId) {
 }
 
 function updateScreenshot(screenshot) {
+    console.log('[Renderer] updateScreenshot called:', screenshot ? `${screenshot.substring(0, 50)}...` : 'null');
     if (screenshot) {
         screenshotImage.src = `data:image/png;base64,${screenshot}`;
+        console.log('[Renderer] Screenshot image src updated, display:', screenshotImage.style.display);
         // Show screenshot, hide placeholder
         screenshotImage.style.display = 'block';
         const placeholder = canvasContent.querySelector('.canvas-placeholder');

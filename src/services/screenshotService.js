@@ -68,11 +68,16 @@ class ScreenshotService {
   async captureFrame() {
     // Skip if paused
     if (this.isPaused) {
+      logger.verbose('[Screenshot Service] Frame capture skipped - service is paused');
       return;
     }
     
+    logger.verbose(`[Screenshot Service] Capturing frame at ${this.currentFPS} FPS...`);
+    
     try {
       let screenshot = await this.mcpService.takeScreenshot();
+      
+      logger.verbose(`[Screenshot Service] Screenshot received: ${screenshot ? (screenshot.substring(0, 50) + '...') : 'null'}`);
       
       if (screenshot && this.callback) {
         // Store original dimensions
@@ -80,6 +85,7 @@ class ScreenshotService {
         
         // Detect if screenshot changed (use full resolution for accurate detection)
         const hasChanged = this.detectChange(screenshot);
+        logger.verbose(`[Screenshot Service] Change detected: ${hasChanged} (consecutive unchanged: ${this.consecutiveUnchangedFrames})`);
         
         // Adjust FPS based on changes
         this.adjustFPS(hasChanged);
@@ -116,7 +122,9 @@ class ScreenshotService {
         };
         
         // Send FULL resolution to UI callback
+        logger.verbose(`[Screenshot Service] Sending screenshot to UI callback (${screenshot.length} bytes)`);
         this.callback(screenshot);
+        logger.verbose('[Screenshot Service] Screenshot sent successfully');
         // Reset error counter on success
         this.consecutiveErrors = 0;
       }

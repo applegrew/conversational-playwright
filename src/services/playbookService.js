@@ -18,9 +18,13 @@ class PlaybookService {
   /**
    * Parse markdown file and extract steps
    * Steps can be:
-   * - Each line (non-empty, non-heading)
-   * - Numbered list items (1. Step)
-   * - Bullet points (- Step or * Step)
+   * - Numbered list items (1. Step) with optional indented sub-bullets
+   * - Standalone bullet points (- Step or * Step)
+   * 
+   * Example multi-line step:
+   * 8. Fill in the form with the following details:
+   *     - First Name: John
+   *     - Last Name: Doe
    */
   async parseMarkdownFile(filePath) {
     logger.info(`[Playbook] Parsing markdown file: ${filePath}`);
@@ -29,8 +33,10 @@ class PlaybookService {
       const content = await fs.readFile(filePath, 'utf-8');
     const lines = content.split('\n');
     const steps = [];
+    let currentStep = null;
 
-    for (const line of lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       const trimmed = line.trim();
       
       // Skip empty lines
@@ -42,14 +48,28 @@ class PlaybookService {
       // Skip horizontal rules
       if (/^[-*_]{3,}$/.test(trimmed)) continue;
       
-      // Parse numbered list items (1. Step, 2. Step, etc.)
-      const numberedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
-      if (numberedMatch) {
-        steps.push(numberedMatch[1].trim());
+      // Check if this is an indented sub-bullet (part of previous numbered step)
+      const indentedBulletMatch = line.match(/^\s{2,}[-*]\s+(.+)$/);
+      if (indentedBulletMatch && currentStep !== null) {
+        // Append sub-bullet to current step
+        currentStep += '\n    - ' + indentedBulletMatch[1].trim();
         continue;
       }
       
-      // Parse bullet points (- Step or * Step)
+      // If we have a current step and this is not a sub-bullet, finalize it
+      if (currentStep !== null) {
+        steps.push(currentStep);
+        currentStep = null;
+      }
+      
+      // Parse numbered list items (1. Step, 2. Step, etc.)
+      const numberedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
+      if (numberedMatch) {
+        currentStep = numberedMatch[1].trim();
+        continue;
+      }
+      
+      // Parse standalone bullet points (- Step or * Step) at root level
       const bulletMatch = trimmed.match(/^[-*]\s+(.+)$/);
       if (bulletMatch) {
         steps.push(bulletMatch[1].trim());
@@ -57,7 +77,11 @@ class PlaybookService {
       }
       
       // Skip any other text (descriptions, titles, etc.)
-      // Only numbered lists and bullet points are treated as steps
+    }
+    
+    // Don't forget to add the last step if it exists
+    if (currentStep !== null) {
+      steps.push(currentStep);
     }
 
     logger.info(`[Playbook] Parsed ${steps.length} steps from markdown file`);
