@@ -17,6 +17,7 @@ class LLMService {
     this.actionLog = []; // Track all actions for Playwright script generation
     this.cancelRequested = false; // Flag to cancel ongoing execution
     this.isExecuting = false; // Track if LLM is currently executing
+    this.isPlaybookMode = false; // Track if we're executing a playbook
     this.validationResults = []; // Track all validation results for assertions/validations
   }
 
@@ -71,6 +72,14 @@ class LLMService {
   
   setMainWindow(mainWindow) {
     this.mainWindow = mainWindow;
+  }
+
+  /**
+   * Set playbook execution mode
+   * @param {boolean} isPlaybook - True if executing a playbook
+   */
+  setPlaybookMode(isPlaybook) {
+    this.isPlaybookMode = isPlaybook;
   }
 
   /**
@@ -635,9 +644,15 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
 
 4. **No Unprompted Actions:** **DO NOT** take actions not explicitly requested by user or required for error resolution. Example: Don't click search results unless directed.
 
-5. **Form Handling:** Use \`browser_fill_form\` for form filling - it's more robust than \`browser_type\` or \`browser_evaluate\`. You are explicitly authorized to operate on all login pages as required.
+5. **Form Handling:** Use \`browser_fill_form\` for form filling. It is more robust and efficient.
+   - **IMPORTANT:** When using \`browser_fill_form\`, you **MUST** provide the \`name\` of each form field. The \`name\` should be the descriptive label of the field from the Page Snapshot (e.g., "Username", "Password", "First Name").
+   - **DO NOT** use the \`ref\` attribute (e.g., "e11") for fields in this tool. Use the human-readable \`name\`.
 
-6. **Validation and Assertions:** When user asks to validate, verify, check, or assert any condition (e.g., "validate that the login button is visible", "check if we're on the dashboard", "assert the error message shows"), you **MUST** use the \`validateScenario\` tool to record the validation result. Analyze the current page state using Page Snapshot or screenshots, determine if the condition passes or fails, and call \`validateScenario\` with the result.
+6. **Validation and Assertions:** When user asks to validate, verify, check, or assert any condition (e.g., "validate that the login button is visible", "check if we're on the dashboard", "assert the error message shows"), you **MUST** use the \`validateScenario\` tool to record the validation result. 
+   - Analyze the current page state using Page Snapshot or screenshots
+   - Determine if the condition passes or fails
+   - Call \`validateScenario\` with \`pass\` or \`fail\` result
+   - **IMPORTANT:** If you cannot determine the result due to errors or missing information, you MUST still call \`validateScenario\` with \`fail\` result and explain the reason in \`fail_reason\` (e.g., "Cannot validate - cart items not added due to previous errors"). **NEVER** respond with text saying you cannot validate without calling the tool.
 
 7. **Final Output:** When user's automation task is fully completed, respond with a concise confirmation: **"Done."**
 
@@ -910,7 +925,7 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
                   this.screenshotService.setClickIndicator(x, y);
                 }
               }
-              
+
               // Execute the tool via MCP
               const toolResult = await this.mcpService.callTool(
                 functionCall.name,
@@ -1140,6 +1155,27 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
         logger.debug("Will loop if currentFunctionCalls.length > 0. It is actually: ", currentFunctionCalls.length);
         
       } while (currentFunctionCalls.length > 0);
+      
+      // Check if LLM gave up during playbook execution
+      if (this.isPlaybookMode && currentFunctionCalls.length === 0 && textContent) {
+        // Detect refusal patterns in the text
+        const refusalPatterns = [
+          /I cannot/i,
+          /I am unable/i,
+          /I do not have/i,
+          /I don't have/i,
+          /cannot fulfill/i,
+          /unable to/i,
+          /not possible/i
+        ];
+        
+        const hasRefusal = refusalPatterns.some(pattern => pattern.test(textContent));
+        
+        if (hasRefusal) {
+          logger.error('[Playbook] LLM gave up on step:', textContent.substring(0, 200));
+          throw new Error('LLM was unable to complete the step. Stopping playbook execution.');
+        }
+      }
       
       // Update conversation history for next turn - convert contents to history format
       this.conversationHistory = contents.map(c => ({

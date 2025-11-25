@@ -119,6 +119,9 @@ class PlaybookService {
         throw new Error('No valid steps found in markdown file. Make sure to use numbered lists (1. Step), bullet points (- Step), or plain text lines.');
       }
 
+      // Set playbook mode on LLM service
+      this.llmService.setPlaybookMode(true);
+      
       // Notify UI that playbook execution is starting
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         this.mainWindow.webContents.send('playbook-started');
@@ -161,7 +164,12 @@ class PlaybookService {
           
         } catch (error) {
           logger.error(`[Playbook] Step ${i + 1}/${this.steps.length} failed:`, error);
-          this.sendToUI('system', `❌ Step ${i + 1} failed: ${error.message}`);
+          
+          // Show which step failed with its content
+          const stepPreview = step.length > 100 ? step.substring(0, 100) + '...' : step;
+          this.sendToUI('system', `❌ Playbook execution failed at step ${i + 1}/${this.steps.length}`);
+          this.sendToUI('system', `Step: "${stepPreview}"`);
+          this.sendToUI('system', `Error: ${error.message}`);
           
           // Stop execution on error
           throw new Error(`Playbook execution stopped at step ${i + 1}: ${error.message}`);
@@ -203,6 +211,9 @@ class PlaybookService {
       throw error;
       
     } finally {
+      // Clear playbook mode
+      this.llmService.setPlaybookMode(false);
+      
       this.isExecuting = false;
       this.currentStepIndex = 0;
       this.steps = [];
