@@ -148,9 +148,23 @@ class PlaybookService {
       this.sendToUI('system', `✅ Playbook execution completed successfully (${this.steps.length}/${this.steps.length} steps)`);
       logger.info('[Playbook] Playbook execution completed successfully');
       
-      // Notify UI that playbook execution is complete
+      // Get validation results
+      const validationResults = this.llmService.getValidationResults();
+      
+      // Log validation summary
+      if (validationResults.length > 0) {
+        logger.info(`[Playbook] ${validationResults.length} validation(s) recorded during playbook execution`);
+        const passCount = validationResults.filter(v => v.result === 'pass').length;
+        const failCount = validationResults.filter(v => v.result === 'fail').length;
+        logger.info(`[Playbook] Validation summary: ${passCount} passed, ${failCount} failed`);
+      }
+      
+      // Notify UI that playbook execution is complete with validation results
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send('playbook-completed', { success: true });
+        this.mainWindow.webContents.send('playbook-completed', { 
+          success: true, 
+          validationResults 
+        });
       }
       
     } catch (error) {

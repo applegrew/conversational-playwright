@@ -165,6 +165,32 @@ function initializeIpcHandlers(services) {
       return { success: false, error: error.message };
     }
   });
+
+  ipcMain.handle('get-validation-results', async (event) => {
+    if (!llmService) {
+      return { success: false, error: 'LLM service not initialized' };
+    }
+    try {
+      const validationResults = llmService.getValidationResults();
+      return { success: true, validationResults };
+    } catch (error) {
+      logger.error('Error getting validation results:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('clear-validation-results', async (event) => {
+    if (!llmService) {
+      return { success: false, error: 'LLM service not initialized' };
+    }
+    try {
+      llmService.clearValidationResults();
+      return { success: true };
+    } catch (error) {
+      logger.error('Error clearing validation results:', error);
+      return { success: false, error: error.message };
+    }
+  });
   
   ipcMain.handle('get-playbook-status', async (event) => {
     if (!playbookService) {

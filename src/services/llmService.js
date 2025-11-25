@@ -17,6 +17,7 @@ class LLMService {
     this.actionLog = []; // Track all actions for Playwright script generation
     this.cancelRequested = false; // Flag to cancel ongoing execution
     this.isExecuting = false; // Track if LLM is currently executing
+    this.validationResults = []; // Track all validation results for assertions/validations
   }
 
   async initialize() {
@@ -540,6 +541,32 @@ Always respond in a helpful and friendly manner.`;
           
         // Convert MCP tools to the required formats
         this._geminiToolDeclarations = this.convertMcpToGeminiTools(tools);
+        
+        // Add custom validateScenario tool
+        this._geminiToolDeclarations.push({
+          name: 'validateScenario',
+          description: 'Record a validation or assertion result for the current page state. Use this when the user asks to validate, verify, or assert any condition based on what is visible on the page. This tool tracks all validations and displays them at the end of a playbook run.',
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              scenario_description: {
+                type: Type.STRING,
+                description: 'A clear description of what is being validated (e.g., "Login button is visible", "User is on dashboard page", "Error message displays")'
+              },
+              validation_result: {
+                type: Type.STRING,
+                description: 'The result of the validation',
+                enum: ['pass', 'fail']
+              },
+              fail_reason: {
+                type: Type.STRING,
+                description: 'Detailed explanation of why the validation failed. Required when validation_result is "fail", optional otherwise.'
+              }
+            },
+            required: ['scenario_description', 'validation_result']
+          }
+        });
+        
         logger.verbose('Gemini tool declarations:', JSON.stringify(this._geminiToolDeclarations, null, 2));
 
         this._geminiSystemPrompt = `### **Core Identity and Role**
@@ -610,7 +637,9 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
 
 5. **Form Handling:** Use \`browser_fill_form\` for form filling - it's more robust than \`browser_type\` or \`browser_evaluate\`. You are explicitly authorized to operate on all login pages as required.
 
-6. **Final Output:** When user's automation task is fully completed, respond with a concise confirmation: **"Done."**
+6. **Validation and Assertions:** When user asks to validate, verify, check, or assert any condition (e.g., "validate that the login button is visible", "check if we're on the dashboard", "assert the error message shows"), you **MUST** use the \`validateScenario\` tool to record the validation result. Analyze the current page state using Page Snapshot or screenshots, determine if the condition passes or fails, and call \`validateScenario\` with the result.
+
+7. **Final Output:** When user's automation task is fully completed, respond with a concise confirmation: **"Done."**
 
 ### **Error Resolution Protocol**
 
@@ -782,6 +811,92 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
               visualChange: undefined, // No visual change for screenshot capture
               changePercent: undefined
             });
+          } else if (functionCall.name === 'validateScenario') {
+            // Handle custom validateScenario tool
+            try {
+              const args = functionCall.args || {};
+              const { scenario_description, validation_result, fail_reason } = args;
+              
+              // Validate inputs
+              if (!scenario_description || !validation_result) {
+                throw new Error('scenario_description and validation_result are required');
+              }
+              
+              if (!['pass', 'fail'].includes(validation_result)) {
+                throw new Error('validation_result must be either "pass" or "fail"');
+              }
+              
+              // Create validation record
+              const validationRecord = {
+                timestamp: new Date().toISOString(),
+                scenario: scenario_description,
+                result: validation_result,
+                failReason: fail_reason || null
+              };
+              
+              // Store validation result
+              this.validationResults.push(validationRecord);
+              
+              // Log validation
+              const resultIcon = validation_result === 'pass' ? '✅' : '❌';
+              logger.info(`[Validation] ${resultIcon} ${scenario_description}: ${validation_result.toUpperCase()}${fail_reason ? ' - ' + fail_reason : ''}`);
+              
+              // Emit tool execution success
+              const duration = Date.now() - startTime;
+              this.emitToolEvent('tool-execution-success', {
+                toolId,
+                toolName: functionCall.name,
+                duration,
+                visualChange: undefined,
+                changePercent: undefined
+              });
+              
+              // Send validation result back to Gemini
+              const resultMessage = validation_result === 'pass' 
+                ? `Validation passed: ${scenario_description}`
+                : `Validation failed: ${scenario_description}. Reason: ${fail_reason || 'Not specified'}`;
+              
+              functionResponses.push({
+                functionResponse: {
+                  name: functionCall.name,
+                  response: {
+                    content: [{
+                      type: 'text',
+                      text: `${resultIcon} ${resultMessage}\n\nValidation has been recorded. Total validations so far: ${this.validationResults.length}`
+                    }]
+                  }
+                }
+              });
+              
+              // Also send a user-visible message for validations
+              this.sendAssistantMessage(`${resultIcon} **Validation ${validation_result === 'pass' ? 'Passed' : 'Failed'}**: ${scenario_description}${fail_reason ? '\n**Reason**: ' + fail_reason : ''}`);
+              
+            } catch (error) {
+              logger.error(`Error handling validateScenario:`, error);
+              
+              // Emit error event
+              this.emitToolEvent('tool-execution-error', {
+                toolId,
+                toolName: functionCall.name,
+                error: error.message
+              });
+              
+              // Send error response
+              functionResponses.push({
+                functionResponse: {
+                  name: functionCall.name,
+                  response: {
+                    isError: true,
+                    content: [{
+                      type: 'text',
+                      text: `Error recording validation: ${error.message}`
+                    }]
+                  }
+                }
+              });
+              
+              hadError = true;
+            }
           } else {
             try {
               // Special handling for coordinate-based clicks - set visual indicator
@@ -1070,6 +1185,14 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
 
   clearActionLog() {
     this.actionLog = [];
+  }
+
+  getValidationResults() {
+    return this.validationResults;
+  }
+
+  clearValidationResults() {
+    this.validationResults = [];
   }
 
   /**

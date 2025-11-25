@@ -177,6 +177,12 @@ function setupEventListeners() {
     // Listen for playbook execution completion
     window.electronAPI.onPlaybookCompleted((data) => {
         console.log('[Renderer] Playbook execution completed:', data);
+        
+        // Display validation results if any
+        if (data.validationResults && data.validationResults.length > 0) {
+            displayValidationSummary(data.validationResults);
+        }
+        
         chatInput.disabled = false;
         chatInput.classList.remove('chat-input-readonly');
         chatInput.placeholder = 'Type your message here...';
@@ -487,6 +493,94 @@ function addErrorMessage(errorInfo, originalMessage) {
     
     chatMessages.appendChild(messageDiv);
     chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+/**
+ * Display validation results summary in a formatted card
+ */
+function displayValidationSummary(validationResults) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message message-system validation-summary';
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    
+    // Create header
+    const header = document.createElement('div');
+    header.className = 'validation-summary-header';
+    
+    const passCount = validationResults.filter(v => v.result === 'pass').length;
+    const failCount = validationResults.filter(v => v.result === 'fail').length;
+    const totalCount = validationResults.length;
+    
+    header.innerHTML = `
+        <h3>📊 Validation Summary</h3>
+        <div class="validation-stats">
+            <span class="validation-stat-pass">✅ ${passCount} Passed</span>
+            <span class="validation-stat-fail">❌ ${failCount} Failed</span>
+            <span class="validation-stat-total">📋 ${totalCount} Total</span>
+        </div>
+    `;
+    contentDiv.appendChild(header);
+    
+    // Create table
+    const table = document.createElement('table');
+    table.className = 'validation-table';
+    
+    // Table header
+    const thead = document.createElement('thead');
+    thead.innerHTML = `
+        <tr>
+            <th>Result</th>
+            <th>Scenario</th>
+            <th>Reason</th>
+            <th>Time</th>
+        </tr>
+    `;
+    table.appendChild(thead);
+    
+    // Table body
+    const tbody = document.createElement('tbody');
+    validationResults.forEach(validation => {
+        const row = document.createElement('tr');
+        row.className = `validation-row-${validation.result}`;
+        
+        const resultIcon = validation.result === 'pass' ? '✅' : '❌';
+        const resultClass = validation.result === 'pass' ? 'validation-pass' : 'validation-fail';
+        
+        const failReasonText = validation.failReason || '-';
+        const timeStr = new Date(validation.timestamp).toLocaleTimeString();
+        
+        row.innerHTML = `
+            <td class="${resultClass}">${resultIcon}</td>
+            <td class="validation-scenario">${escapeHtml(validation.scenario)}</td>
+            <td class="validation-reason">${escapeHtml(failReasonText)}</td>
+            <td class="validation-time">${timeStr}</td>
+        `;
+        tbody.appendChild(row);
+    });
+    table.appendChild(tbody);
+    
+    contentDiv.appendChild(table);
+    
+    const timestamp = document.createElement('div');
+    timestamp.className = 'message-timestamp';
+    timestamp.textContent = new Date().toLocaleTimeString();
+    
+    messageDiv.appendChild(contentDiv);
+    messageDiv.appendChild(timestamp);
+    
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+/**
+ * Escape HTML to prevent XSS
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 function addLoadingMessage() {

@@ -666,3 +666,129 @@ body {
 .visual-change-no {
     color: #ff9800;
 }
+
+/* Validation Summary Styles */
+.validation-summary {
+    background: linear-gradient(135deg, #1a2332 0%, #1f1f1f 100%);
+    border-left: 4px solid #4a9eff;
+    margin: 16px 0;
+}
+
+.validation-summary .message-content {
+    padding: 20px;
+}
+
+.validation-summary-header {
+    margin-bottom: 16px;
+}
+
+.validation-summary-header h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #ffffff;
+    margin: 0 0 12px 0;
+}
+
+.validation-stats {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.validation-stats span {
+    font-size: 14px;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.validation-stat-pass {
+    color: #4caf50;
+    border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.validation-stat-fail {
+    color: #f44336;
+    border: 1px solid rgba(244, 67, 54, 0.3);
+}
+
+.validation-stat-total {
+    color: #4a9eff;
+    border: 1px solid rgba(74, 158, 255, 0.3);
+}
+
+.validation-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+    font-size: 13px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.validation-table thead {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.validation-table th {
+    padding: 12px;
+    text-align: left;
+    font-weight: 600;
+    color: #b0b0b0;
+    border-bottom: 2px solid #333;
+}
+
+.validation-table td {
+    padding: 12px;
+    border-bottom: 1px solid #2a2a2a;
+    color: #e0e0e0;
+}
+
+.validation-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.validation-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.validation-row-pass {
+    border-left: 3px solid #4caf50;
+}
+
+.validation-row-fail {
+    border-left: 3px solid #f44336;
+}
+
+.validation-pass {
+    color: #4caf50;
+    font-size: 18px;
+    text-align: center;
+}
+
+.validation-fail {
+    color: #f44336;
+    font-size: 18px;
+    text-align: center;
+}
+
+.validation-scenario {
+    font-weight: 500;
+    max-width: 300px;
+    word-wrap: break-word;
+}
+
+.validation-reason {
+    color: #b0b0b0;
+    font-style: italic;
+    max-width: 250px;
+    word-wrap: break-word;
+}
+
+.validation-time {
+    color: #888;
+    font-size: 12px;
+    white-space: nowrap;
+}
