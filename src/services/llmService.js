@@ -554,7 +554,7 @@ Always respond in a helpful and friendly manner.`;
         // Add custom validateScenario tool
         this._geminiToolDeclarations.push({
           name: 'validateScenario',
-          description: 'Record a validation or assertion result for the current page state. Use this when the user asks to validate, verify, or assert any condition based on what is visible on the page. This tool tracks all validations and displays them at the end of a playbook run.',
+          description: 'MANDATORY tool for recording validation results. You MUST call this tool whenever the user asks to validate, verify, check, or assert any condition. After analyzing the page state (via browser_snapshot), you MUST call this tool with pass or fail. Never return empty or text response for validation requests.',
           parameters: {
             type: Type.OBJECT,
             properties: {
@@ -648,11 +648,24 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
    - **IMPORTANT:** When using \`browser_fill_form\`, you **MUST** provide the \`name\` of each form field. The \`name\` should be the descriptive label of the field from the Page Snapshot (e.g., "Username", "Password", "First Name").
    - **DO NOT** use the \`ref\` attribute (e.g., "e11") for fields in this tool. Use the human-readable \`name\`.
 
-6. **Validation and Assertions:** When user asks to validate, verify, check, or assert any condition (e.g., "validate that the login button is visible", "check if we're on the dashboard", "assert the error message shows"), you **MUST** use the \`validateScenario\` tool to record the validation result. 
-   - Analyze the current page state using Page Snapshot or screenshots
-   - Determine if the condition passes or fails
-   - Call \`validateScenario\` with \`pass\` or \`fail\` result
-   - **IMPORTANT:** If you cannot determine the result due to errors or missing information, you MUST still call \`validateScenario\` with \`fail\` result and explain the reason in \`fail_reason\` (e.g., "Cannot validate - cart items not added due to previous errors"). **NEVER** respond with text saying you cannot validate without calling the tool.
+6. **Validation and Assertions (CRITICAL):** When user asks to validate, verify, check, or assert any condition (e.g., "validate that the login button is visible", "validate that the cart page has shown up", "check if we're on the dashboard", "assert the error message shows"), you **MUST ALWAYS** call the \`validateScenario\` tool as the FINAL action.
+
+   **VALIDATION WORKFLOW:**
+   a. First, get current page state:
+      - Use \`browser_snapshot\` for text/element validation (buttons, text, links, form fields)
+      - Use \`browser_take_screenshot\` for visual validation (colors, layout, icons, charts, images)
+   b. Analyze the snapshot/screenshot to determine if the condition passes or fails
+   c. **IMMEDIATELY** call \`validateScenario\` with \`pass\` or \`fail\` result - THIS IS MANDATORY
+   
+   **CRITICAL RULES:**
+   - A validation request is NOT complete until \`validateScenario\` is called
+   - You must NEVER return an empty response after checking page state for validation
+   - You must NEVER return only text without calling \`validateScenario\`
+   - If you cannot determine the result, call \`validateScenario\` with \`fail\` and explain in \`fail_reason\`
+   
+   **Example:** User says "Validate the cart shows 2 items"
+   1. Call \`browser_snapshot\` → See page state
+   2. Call \`validateScenario\` with \`pass\` if cart shows 2 items, or \`fail\` with reason if not
 
 7. **Final Output:** When user's automation task is fully completed, respond with a concise confirmation: **"Done."**
 
@@ -688,27 +701,20 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
 - Visual Change Detection = Your success/failure indicator
 - Red Dot Feedback = Coordinate accuracy verification when using vision-based actions
 - Switch strategies quickly when visual change shows no effect
+- **VALIDATION = MUST call \`validateScenario\`** - Never return empty or text-only for validation requests
 
 `;
         logger.debug('Gemini system prompt:', this._geminiSystemPrompt);
       }
 
       // Always prepend tool context to ensure Gemini knows to use tools
-      let messageToSend = `[Remember: Use the available browser automation tools to complete this request]\n\n${userMessage}`;
-
-      // // Check if there's a recent screenshot to include
-      // const lastMessage = this.conversationHistory[this.conversationHistory.length - 1];
-      // let imageParts = [];
-      // if (lastMessage && lastMessage.role === 'model') {
-      //   const toolResponse = lastMessage.parts.find(p => p.functionResponse && p.functionResponse.name === 'browser_take_screenshot');
-      //   if (toolResponse) {
-      //     const screenshotContent = toolResponse.functionResponse.response.content.find(c => c.type === 'image');
-      //     if (screenshotContent && screenshotContent.data) {
-      //       console.log('Attaching screenshot to next message...');
-      //       imageParts.push({ inlineData: { mimeType: 'image/png', data: screenshotContent.data } });
-      //     }
-      //   }
-      // }
+      let messageToSend = `The current time is: ${new Date().toLocaleString()}\n\n[Remember: Use the available browser automation tools to complete this request]\n\n${userMessage}`;
+      
+      // Add extra reminder for validation requests
+      const lowerMessage = userMessage.toLowerCase();
+      if (lowerMessage.includes('validate') || lowerMessage.includes('verify') || lowerMessage.includes('check') || lowerMessage.includes('assert')) {
+        messageToSend += `\n\n[REMINDER: This is a validation request. You MUST call the validateScenario tool with pass or fail result. Do NOT return empty or text-only response.]`;
+      }
 
       // Debug logging
       logger.debug('Message to send:', messageToSend.substring(0, 200) + '...');
@@ -726,9 +732,6 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
       
       // Add current message
       const currentParts = [{ text: messageToSend }];
-      // if (imageParts.length > 0) {
-      //   currentParts.push(...imageParts.map(img => ({ inlineData: img.inlineData })));
-      // }
       contents.push({ role: 'user', parts: currentParts });
       
       // Handle function calls

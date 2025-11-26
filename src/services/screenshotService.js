@@ -11,7 +11,7 @@ class ScreenshotService {
     this.minFPS = 2;  // Minimum FPS when idle (no changes)
     this.maxFPS = 15; // Maximum FPS when active (rapid changes)
     this.currentFPS = this.maxFPS; // Start at max FPS
-    this.frameInterval = 1000 / this.currentFPS;
+    this.frameInterval = Math.ceil(1000 / this.currentFPS);
     // Change detection
     this.consecutiveUnchangedFrames = 0;
     this.unchangedThreshold = 3; // Slow down after 3 unchanged frames
@@ -40,7 +40,7 @@ class ScreenshotService {
     this.isRunning = true;
     this.callback = callback;
     this.currentFPS = this.maxFPS; // Start at max FPS
-    this.frameInterval = 1000 / this.currentFPS;
+    this.frameInterval = Math.ceil(1000 / this.currentFPS);
     
     console.log(`Starting adaptive screenshot capture (${this.minFPS}-${this.maxFPS} FPS)`);
     
@@ -193,67 +193,11 @@ class ScreenshotService {
         
         if (newFPS !== this.currentFPS) {
           this.currentFPS = newFPS;
-          this.frameInterval = 1000 / this.currentFPS;
+          this.frameInterval = Math.ceil(1000 / this.currentFPS);
           logger.verbose(`[Adaptive FPS] No changes detected → ${this.currentFPS} FPS`);
         }
       }
     }
-  }
-  
-  // OLD setInterval-based code removed, replaced with captureLoop
-  startOld(callback) {
-    if (this.isRunning) {
-      console.log('Screenshot service already running');
-      return;
-    }
-
-    this.isRunning = true;
-    this.callback = callback;
-    
-    console.log(`Starting screenshot capture at ${this.currentFPS} FPS`);
-    
-    // Capture screenshots at the specified FPS
-    this.intervalId = setInterval(async () => {
-      // Skip if paused
-      if (this.isPaused) {
-        return;
-      }
-      
-      try {
-        const screenshot = await this.mcpService.takeScreenshot();
-        if (screenshot && this.callback) {
-          // Cache the screenshot for LLM reuse
-          this.lastScreenshot = screenshot;
-          this.callback(screenshot);
-          // Reset error counter on success
-          this.consecutiveErrors = 0;
-        }
-      } catch (error) {
-        // Special handling for client not available (during reconnection)
-        if (error.code === 'CLIENT_NOT_AVAILABLE') {
-          // Don't count as consecutive error, just skip this frame
-          // Client will be available again after reconnection completes
-          return;
-        }
-        
-        this.consecutiveErrors++;
-        console.error(`Error capturing screenshot (${this.consecutiveErrors}/${this.maxConsecutiveErrors}):`, error.message);
-        
-        // If too many consecutive errors, pause the screenshot stream
-        if (this.consecutiveErrors >= this.maxConsecutiveErrors) {
-          console.warn(`Too many consecutive screenshot errors (${this.maxConsecutiveErrors}), pausing screenshot stream...`);
-          this.pause();
-          
-          // Try to resume after 10 seconds
-          setTimeout(() => {
-            if (this.isRunning && this.isPaused) {
-              console.log('Attempting to resume screenshot stream...');
-              this.resume();
-            }
-          }, 10000);
-        }
-      }
-    }, this.frameInterval);
   }
 
   stop() {
