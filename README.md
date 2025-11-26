@@ -2,6 +2,8 @@
 
 A test automation application that combines conversational AI with browser automation using Playwright MCP (Model Context Protocol). Control a headless Chrome browser through natural language instructions and see the happening in real-time.
 
+<iframe width="560" height="315" src="https://www.youtube.com/embed/9HJ_UP56Z2Y?si=xG4KL-vuu3NC8wMo" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+
 ## Features
 
 - 🤖 **Conversational AI Interface**: Chat with an AI assistant to control browser automation

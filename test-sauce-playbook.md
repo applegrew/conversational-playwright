@@ -15,9 +15,9 @@
     - Last Name: Biswas
     - Zip Code: 12345
 10. Click on the Continue button.
-11. Validate that the "Overview" page has shown up and validate the following:
-    - Both items are listed.
-    - Item total is equal to sum of the prices of both the items.
-    - The total is equal to the item total plus the tax.
-12. Click on the Finish button.
-13. Validate that the Thank you page has shown up.
+11. Validate that the "Overview" page has shown up.
+12. On the "Overview" page, validate that both items previously added to cart are listed.
+13. Also validate that the "Item total" is equal to sum of the prices of both the items.
+14. Finally on this page, validate that the "Total" is equal to the "Item total" plus the tax.
+15. Click on the Finish button.
+16. Validate that the Thank you page has shown up.
