@@ -1,4 +1,4 @@
-# Conversational Playwright
+# ConversePlay | Conversational Playwright
 
 A test automation application that combines conversational AI with browser automation using Playwright MCP (Model Context Protocol). Control a headless Chrome browser through natural language instructions and see the happening in real-time.
 
