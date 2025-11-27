@@ -1,6 +1,6 @@
 # ConversePlay | Conversational Playwright
 
-A test automation application that combines conversational AI with browser automation using Playwright MCP (Model Context Protocol). Control a headless Chrome browser through natural language instructions and see the happening in real-time.
+This advanced test automation application seamlessly integrates conversational AI with robust browser control, powered by Playwright MCP (Model Context Protocol). The agent interprets natural language instructions to autonomously execute and validate complex test procedures within a headless Chrome environment, providing real-time visual feedback to the user. It effectively translates manual testing workflows into precise, verifiable automation.
 
 [![ConversePlay Demo](https://img.youtube.com/vi/9FDx_Yx-prQ/0.jpg)](https://www.youtube.com/watch?v=9FDx_Yx-prQ)
 
