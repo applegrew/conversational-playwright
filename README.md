@@ -4,7 +4,7 @@ A test automation application that combines conversational AI with browser autom
 
 [![ConversePlay Demo](https://img.youtube.com/vi/9FDx_Yx-prQ/0.jpg)](https://www.youtube.com/watch?v=9FDx_Yx-prQ)
 
-**(Demo video on Youtube)**
+**[(Demo video on Youtube)](https://www.youtube.com/watch?v=9FDx_Yx-prQ)**
 
 ## Features
 
