@@ -1,5 +1,64 @@
 # Changelog
 
+## Version 1.2.0 - Microsoft Fara LLM Support (2025-12-03)
+
+### New Features
+
+#### Microsoft Fara LLM Provider
+- ✅ **Fara-7B support** - Added Microsoft's Fara Computer Use Agent as a third LLM option
+- ✅ **Local execution** - Runs locally via Llama.cpp server (no API key required)
+- ✅ **OpenAI-compatible API** - Uses standard `/v1/chat/completions` endpoint
+- ✅ **Vision-first model** - Trained on visual perception of webpages
+- ✅ **Computer use actions** - Supports mouse clicks, typing, scrolling, navigation, and more
+
+#### Visual-Only Technique for Fara
+- ✅ **Screenshot-based perception** - Fara receives screenshots instead of Page Snapshots
+- ✅ **No accessibility trees** - Text-based DOM representations not sent (not useful to Fara)
+- ✅ **Visual change detection** - Feedback on whether actions produced visual changes
+- ✅ **Red dot click indicator** - Visual marker showing where clicks occurred
+
+### Configuration
+```bash
+# Set provider to fara
+LLM_PROVIDER=fara
+
+# Llama.cpp server URL (no API key needed)
+FARA_REST=http://127.0.0.1:8080
+```
+
+### Fara Action Mapping
+| Fara Action | MCP Tool |
+|-------------|----------|
+| `visit_url` | `browser_navigate` |
+| `web_search` | `browser_navigate` (Google) |
+| `left_click` | `browser_mouse_click_xy` |
+| `mouse_move` | `browser_mouse_move` |
+| `type` | `browser_type` |
+| `key` | `browser_press_key` |
+| `scroll` | `browser_scroll` |
+| `history_back` | `browser_navigate_back` |
+| `wait` | Internal wait |
+| `terminate` | Task completion |
+
+### Technical Details
+- Added `getFaraSystemPrompt()` - Fara's full system prompt with computer_use tool
+- Added `parseFaraToolCall()` - Parses JSON tool calls from Fara's output
+- Added `mapFaraActionToMCP()` - Maps Fara actions to Playwright MCP tools
+- Added `processMessageFara()` - Main message processing loop for Fara
+- Updated `clearHistory()` - Clears Fara-specific conversation history
+
+### Notes
+- Fara requires a running Llama.cpp server with **both** the model and mmproj files:
+  ```bash
+  llama-server -m Fara-7B.gguf --mmproj Fara-7B-mmproj.gguf --port 8080 -c 16384
+  ```
+- The `--mmproj` flag is **required** for vision support
+- Fara supports **128k tokens** context, but llama.cpp defaults to 4096. Use `-c 16384` or higher.
+- Playwright script generation not yet supported for Fara (use Gemini for that feature)
+- Fara is optimized for coordinate-based clicking using visual perception
+
+---
+
 ## Version 1.1.0 - Stability and UX Improvements (2025-11-06)
 
 ### Major Improvements
@@ -138,7 +197,7 @@ conversational-playwright/
 - Network connectivity required for LLM API calls
 
 ### Future Enhancements (Potential)
-- [ ] Support for additional LLM providers (OpenAI, etc.)
+- [x] Support for additional LLM providers ~~(OpenAI, etc.)~~ - Added Microsoft Fara in v1.2.0
 - [ ] Adjustable screenshot FPS
 - [ ] Session recording and playback
 - [ ] Multiple browser tabs support

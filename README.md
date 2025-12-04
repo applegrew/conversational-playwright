@@ -12,7 +12,7 @@ This advanced test automation application seamlessly integrates conversational A
 - 🌐 **Playwright MCP Integration**: Uses official `@playwright/mcp` package for browser automation
 - 📸 **Real-time Screenshot Streaming**: View browser activity in the canvas area
 - 🎨 **Modern UI**: Beautiful dark-themed interface with chat on the left and browser view on the right
-- ⚡ **Dual LLM Support**: Choose between Google's Gemini or Anthropic's Claude for intelligent command interpretation
+- ⚡ **Triple LLM Support**: Choose between Google's Gemini, Anthropic's Claude, or Microsoft's Fara for intelligent command interpretation
 
 ## Prerequisites
 
@@ -20,12 +20,14 @@ This advanced test automation application seamlessly integrates conversational A
 - API key for your chosen LLM provider:
   - **Gemini**: Get from [Google AI Studio](https://aistudio.google.com/app/apikey)
   - **Claude**: Get from [Anthropic Console](https://console.anthropic.com/)
+  - **Fara**: No API key needed - runs locally via Llama.cpp
 
 ### Note on models
 
 - Although Claude is supported but it has not been tested for accuracy.
 - Gemini 2.5 Flash Lite seems to provide good accurate results.
 - Gemini 2.0 Flash Lite works too but is unable to handle login pages and sometimes fails in mysterious ways.
+- **Fara-7B** is a vision-first model from Microsoft that uses visual perception instead of accessibility trees. It works best for coordinate-based clicking.
 
 ## Installation
 
@@ -58,6 +60,14 @@ ANTHROPIC_API_KEY=your_actual_api_key_here
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=your_actual_api_key_here
 ```
+
+**For Fara (local):**
+```bash
+LLM_PROVIDER=fara
+FARA_REST=http://127.0.0.1:8080
+```
+
+> **Note:** Fara requires a running Llama.cpp server with the Fara-7B model. See [Fara Setup](#fara-setup) for details.
 
 ## Usage
 
@@ -174,6 +184,16 @@ The MCP server runs with SSE (Server-Sent Events) transport on HTTP. You can mod
 - `--user-agent "Custom UA"` - Set custom user agent
 - `--timeout-action 10000` - Set action timeout (default 5000ms)
 
+### Fara Configuration (Local LLM)
+```bash
+FARA_REST=http://127.0.0.1:8080  # Llama.cpp server URL
+```
+
+Fara is Microsoft's Computer Use Agent that runs locally:
+- **Vision-only**: Uses screenshots instead of accessibility trees
+- **No API key**: Runs on your local machine via Llama.cpp
+- **Computer use actions**: Mouse clicks, typing, scrolling, navigation
+
 ### Logging Configuration
 ```bash
 LOG_LEVEL=INFO  # Options: ERROR, WARN, INFO, DEBUG, VERBOSE
@@ -224,12 +244,36 @@ LOG_LEVEL=INFO  # Options: ERROR, WARN, INFO, DEBUG, VERBOSE
 - Open DevTools in development mode: `npm run dev`
 - Check both main process console and renderer console logs
 
+### Fara Setup
+
+To use Fara, you need to run the Fara-7B model locally with Llama.cpp:
+
+1. Download **both** files from Hugging Face (GGUF format):
+   - `Fara-7B-Q6_K_L.gguf` - The main model
+   - `Fara-7B-mmproj-bf16.gguf` - The multimodal projector (required for vision)
+
+2. Install and build [Llama.cpp](https://github.com/ggerganov/llama.cpp)
+
+3. Start the server **with the mmproj file**:
+```bash
+llama-server -m Fara-7B-Q6_K_L.gguf --mmproj Fara-7B-mmproj-bf16.gguf --port 5001 -c 16384 --temp 0
+```
+   > **Note:** Fara supports up to 128k tokens context. The `-c` flag sets the context size in llama.cpp (default is only 4096). Use `-c 16384` or higher for multi-step automation tasks.
+
+4. Set `LLM_PROVIDER=fara` and `FARA_REST=http://127.0.0.1:8080` in `.env`
+
+5. Start the app: `npm start`
+
+**Important:** The `--mmproj` flag is required! Without it, you'll get "image input is not supported" errors. Fara is a vision model and needs the multimodal projector to process screenshots.
+
+**Note:** Fara is a vision-first model that perceives webpages visually. It uses coordinate-based clicking and does not use Page Snapshots (accessibility trees).
+
 ## Technologies Used
 
 - **Electron**: Desktop application framework
 - **Playwright**: Browser automation
 - **Model Context Protocol (MCP)**: Standardized tool communication
-- **Anthropic Claude / Google Gemini**: AI language models with function calling
+- **Anthropic Claude / Google Gemini / Microsoft Fara**: AI language models with function calling
 - **Node.js**: Backend runtime
 
 ## License

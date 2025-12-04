@@ -22,7 +22,14 @@ class LLMService {
   }
 
   async initialize() {
-    if (process.env.GEMINI_API_KEY) {
+    // Check LLM_PROVIDER env var first for explicit selection
+    const explicitProvider = process.env.LLM_PROVIDER?.toLowerCase();
+    
+    if (explicitProvider === 'fara' && process.env.FARA_REST) {
+      this.provider = 'fara';
+      this.faraBaseUrl = process.env.FARA_REST;
+      console.log(`Using Fara (local) as LLM provider at ${this.faraBaseUrl}`);
+    } else if (process.env.GEMINI_API_KEY) {
       this.provider = 'gemini';
       this.client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       this.modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
@@ -33,9 +40,14 @@ class LLMService {
         apiKey: process.env.ANTHROPIC_API_KEY
       });
       console.log('Using Claude as LLM provider');
+    } else if (process.env.FARA_REST) {
+      // Fallback to Fara if FARA_REST is set but no explicit provider
+      this.provider = 'fara';
+      this.faraBaseUrl = process.env.FARA_REST;
+      console.log(`Using Fara (local) as LLM provider at ${this.faraBaseUrl}`);
     } else {
       this.provider = 'none';
-      console.warn('No LLM provider API key found. Please set GEMINI_API_KEY or ANTHROPIC_API_KEY in .env');
+      console.warn('No LLM provider configured. Please set GEMINI_API_KEY, ANTHROPIC_API_KEY, or FARA_REST in .env');
     }
   }
 
@@ -52,8 +64,10 @@ class LLMService {
         return await this.processMessageGemini(userMessage);
       } else if (this.provider === 'claude') {
         return await this.processMessageClaude(userMessage);
+      } else if (this.provider === 'fara') {
+        return await this.processMessageFara(userMessage);
       } else {
-        throw new Error('No active LLM provider to process message. Please set GEMINI_API_KEY or ANTHROPIC_API_KEY in .env');
+        throw new Error('No active LLM provider to process message. Please set GEMINI_API_KEY, ANTHROPIC_API_KEY, or FARA_REST in .env');
       }
     } finally {
       // Always clear executing flag, even if error occurs
@@ -298,6 +312,1105 @@ Always respond in a helpful and friendly manner.`;
       }
       
       // Re-throw the error to be handled by main.js
+      throw error;
+    }
+  }
+
+  /**
+   * Get the system prompt for Fara model (Microsoft's Computer Use Agent)
+   * Adapted from magentic-ui prompts for browser-only access
+   * @returns {string} The Fara system prompt
+   */
+  getFaraSystemPrompt() {
+    // Get screen dimensions from screenshot service if available
+    const screenWidth = this.screenshotService?.lastScreenshotDimensions?.scaledWidth || 1024;
+    const screenHeight = this.screenshotService?.lastScreenshotDimensions?.scaledHeight || 768;
+    
+    // Build the computer_use function definition (NousFnCallPrompt format)
+    const computerUseFunction = {
+      type: "function",
+      function: {
+        name: "computer_use",
+        description: "Use mouse and keyboard to interact with a web browser. The browser viewport is " + screenWidth + "x" + screenHeight + " pixels.",
+        parameters: {
+          type: "object",
+          properties: {
+            action: {
+              type: "string",
+              enum: ["left_click", "type", "key", "scroll", "mouse_move", "visit_url", "web_search", "history_back", "wait", "terminate"],
+              description: "The action to perform"
+            },
+            coordinate: {
+              type: "array",
+              items: { type: "integer" },
+              description: "For left_click, type, mouse_move: [x, y] pixel coordinates"
+            },
+            ref: {
+              type: "string",
+              description: "For left_click, type: element reference like 'e42' from page snapshot"
+            },
+            text: {
+              type: "string",
+              description: "For type: the text to type"
+            },
+            keys: {
+              type: "array",
+              items: { type: "string" },
+              description: "For key: keys to press, e.g. ['Enter'], ['Control', 'a']"
+            },
+            pixels: {
+              type: "integer",
+              description: "For scroll: positive=up, negative=down"
+            },
+            url: {
+              type: "string",
+              description: "For visit_url: the URL to navigate to"
+            },
+            query: {
+              type: "string",
+              description: "For web_search: the search query"
+            },
+            time: {
+              type: "integer",
+              description: "For wait: seconds to wait"
+            },
+            status: {
+              type: "string",
+              enum: ["success", "failure"],
+              description: "For terminate: the task status"
+            },
+            answer: {
+              type: "string",
+              description: "For terminate: brief description of what was done"
+            }
+          },
+          required: ["action"]
+        }
+      }
+    };
+    
+    return `You are a helpful assistant.
+
+# Tools
+
+You may call one or more functions to assist with the user query.
+
+You are provided with function signatures within <tools></tools> XML tags:
+<tools>
+${JSON.stringify(computerUseFunction)}
+</tools>
+
+For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:
+<tool_call>
+{"name": "computer_use", "arguments": {"action": "visit_url", "url": "https://example.com"}}
+</tool_call>
+
+# Browser Interface
+
+- Viewport: ${screenWidth}x${screenHeight} pixels
+- When you click, a red dot shows where you clicked on the next screenshot
+- Use element refs (e.g., ref="e42") from the Page Snapshot for reliable targeting
+- Use coordinates for images, canvas, or when refs don't work
+
+# Page Snapshot
+
+The snapshot shows interactive elements:
+\`\`\`yaml
+- button "Sign In" [ref=e34]
+- textbox "Email" [ref=e56]
+\`\`\`
+
+# Instructions
+
+1. Look at the screenshot to understand the current state
+2. Execute the action requested by the user
+3. After the action succeeds, call terminate with status="success"
+`;
+  }
+
+  /**
+   * Parse Fara's tool call from its response text
+   * Fara outputs tool calls in JSON format (may be wrapped in code blocks)
+   * @param {string} text - The response text from Fara
+   * @returns {object|null} Parsed tool call or null if none found
+   */
+  parseFaraToolCall(text) {
+    if (!text) return null;
+    
+    // Try to find JSON block in various formats Fara might output
+    // Order matters - more specific patterns first
+    const patterns = [
+      // <tool_call> {...} </tool_call> format (most common for Fara)
+      /<tool_call>\s*(\{[\s\S]*?\})\s*<\/tool_call>/i,
+      // ```json {...}``` format
+      /```(?:json)?\s*(\{[\s\S]*?"name"[\s\S]*?"arguments"[\s\S]*?\})\s*```/,
+      // Raw JSON with computer_use
+      /(\{[\s\S]*?"name"\s*:\s*"computer_use"[\s\S]*?"arguments"[\s\S]*?\})/,
+      // Any JSON with name and arguments
+      /(\{[\s\S]*?"name"\s*:\s*"[^"]*"[\s\S]*?"arguments"[\s\S]*?\})/
+    ];
+    
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match) {
+        try {
+          const parsed = JSON.parse(match[1]);
+          if (parsed.name && parsed.arguments) {
+            logger.debug('[Fara] Parsed tool call:', JSON.stringify(parsed));
+            return parsed;
+          }
+        } catch (e) {
+          logger.debug('[Fara] Failed to parse JSON match:', e.message);
+        }
+      }
+    }
+    
+    // Try parsing the entire text as JSON (in case it's a clean response)
+    try {
+      const parsed = JSON.parse(text.trim());
+      if (parsed.name && parsed.arguments) {
+        return parsed;
+      }
+    } catch (e) {
+      // Not valid JSON
+    }
+    
+    logger.debug('[Fara] No tool call found in response');
+    return null;
+  }
+
+  /**
+   * Map Fara's computer_use action to MCP tool
+   * @param {object} action - Fara's action object (with action type and params)
+   * @returns {object} MCP tool call {name, args}
+   */
+  mapFaraActionToMCP(action) {
+    const { action: actionType, ...params } = action;
+    
+    // Normalize action type (handle case variations)
+    const normalizedAction = actionType?.toLowerCase()?.replace(/[_-]/g, '');
+    
+    switch (normalizedAction) {
+      // Navigation actions
+      case 'visiturl':
+      case 'visit':
+      case 'goto':
+      case 'navigate':
+      case 'open':
+        return {
+          name: 'browser_navigate',
+          args: { url: params.url }
+        };
+      
+      case 'websearch':
+      case 'search':
+      case 'googlesearch':
+        // Navigate to Google with search query
+        return {
+          name: 'browser_navigate',
+          args: { url: `https://www.bing.com/search?q=${encodeURIComponent(params.query)}&FORM=QBLH` }
+        };
+      
+      // Click actions
+      case 'leftclick':
+      case 'click':
+      case 'singleclick':
+      case 'tap':
+        // Support both coordinate-based and ref-based clicks
+        if (params.ref) {
+          // Use browser_click with ref from page snapshot
+          return {
+            name: 'browser_click',
+            args: { 
+              ref: params.ref,
+              element: params.element || `element ${params.ref}`
+            }
+          };
+        }
+        if (params.coordinate && Array.isArray(params.coordinate)) {
+          return {
+            name: 'browser_mouse_click_xy',
+            args: { 
+              x: params.coordinate[0], 
+              y: params.coordinate[1],
+              element: params.element || `element at (${params.coordinate[0]}, ${params.coordinate[1]})`
+            }
+          };
+        }
+        // Support x, y params directly (alternative format)
+        if (params.x !== undefined && params.y !== undefined) {
+          return {
+            name: 'browser_mouse_click_xy',
+            args: { 
+              x: params.x, 
+              y: params.y,
+              element: params.element || `element at (${params.x}, ${params.y})`
+            }
+          };
+        }
+        return null;
+      
+      case 'rightclick':
+        // Right click support (coordinate-based)
+        if (params.coordinate && Array.isArray(params.coordinate)) {
+          return {
+            name: 'browser_mouse_click_xy',
+            args: { 
+              x: params.coordinate[0], 
+              y: params.coordinate[1],
+              button: 'right',
+              element: params.element || `right click at (${params.coordinate[0]}, ${params.coordinate[1]})`
+            }
+          };
+        }
+        return null;
+      
+      case 'doubleclick':
+        if (params.coordinate && Array.isArray(params.coordinate)) {
+          return {
+            name: 'browser_mouse_click_xy',
+            args: { 
+              x: params.coordinate[0], 
+              y: params.coordinate[1],
+              clickCount: 2,
+              element: params.element || `double click at (${params.coordinate[0]}, ${params.coordinate[1]})`
+            }
+          };
+        }
+        return null;
+      
+      case 'mousemove':
+      case 'hover':
+      case 'moveto':
+        if (params.coordinate && Array.isArray(params.coordinate)) {
+          return {
+            name: 'browser_mouse_move',
+            args: { 
+              x: params.coordinate[0], 
+              y: params.coordinate[1],
+              element: params.element || `element at (${params.coordinate[0]}, ${params.coordinate[1]})`
+            }
+          };
+        }
+        return null;
+      
+      // Text input actions
+      case 'type':
+      case 'input':
+      case 'entertext':
+      case 'fill': {
+        // Fara's type action can include coordinate to click field first
+        // Or use ref from page snapshot like [ref=e42]
+        const refValue = params.ref || params.element;
+        
+        // If coordinate is provided, need to click first then type
+        if (params.coordinate && Array.isArray(params.coordinate)) {
+          // Return a special action that indicates click-then-type
+          return {
+            name: '_type_with_click',
+            args: {
+              x: params.coordinate[0],
+              y: params.coordinate[1],
+              text: params.text || params.content || '',
+              pressEnter: params.press_enter || params.submit || false,
+              clearFirst: params.delete_existing_text || false,
+              element: `input at (${params.coordinate[0]}, ${params.coordinate[1]})`
+            }
+          };
+        }
+        
+        return {
+          name: 'browser_type',
+          args: { 
+            ref: refValue,
+            text: params.text || params.content || '',
+            submit: params.press_enter || params.submit || false,
+            slowly: params.delete_existing_text || false, // Use slowly to clear first
+            element: `input field ${refValue}`  // Required by MCP tool
+          }
+        };
+      }
+      
+      // Keyboard actions
+      case 'key':
+      case 'presskey':
+      case 'keypress':
+      case 'keyboard': {
+        // Handle both array and single key
+        let keys = params.keys || params.key;
+        if (!Array.isArray(keys)) {
+          keys = [keys];
+        }
+        // Map Fara key names to Playwright key names
+        const keyMap = {
+          'Enter': 'Enter',
+          'Return': 'Enter',
+          'Tab': 'Tab',
+          'Escape': 'Escape',
+          'Esc': 'Escape',
+          'Backspace': 'Backspace',
+          'Delete': 'Delete',
+          'ArrowUp': 'ArrowUp',
+          'Up': 'ArrowUp',
+          'ArrowDown': 'ArrowDown',
+          'Down': 'ArrowDown',
+          'ArrowLeft': 'ArrowLeft',
+          'Left': 'ArrowLeft',
+          'ArrowRight': 'ArrowRight',
+          'Right': 'ArrowRight',
+          'PageUp': 'PageUp',
+          'PageDown': 'PageDown',
+          'Control': 'Control',
+          'Ctrl': 'Control',
+          'Alt': 'Alt',
+          'Shift': 'Shift',
+          'Space': 'Space',
+          'Home': 'Home',
+          'End': 'End'
+        };
+        const key = keys.map(k => keyMap[k] || k).join('+');
+        return {
+          name: 'browser_press_key',
+          args: { key }
+        };
+      }
+      
+      // Scroll actions
+      case 'scroll':
+      case 'scrollpage': {
+        // Support multiple scroll formats:
+        // 1. pixels (positive=up, negative=down)
+        // 2. direction + amount
+        // 3. direction only (use default amount)
+        let direction, amount;
+        
+        if (params.pixels !== undefined) {
+          direction = params.pixels > 0 ? 'up' : 'down';
+          amount = Math.abs(params.pixels);
+        } else if (params.direction) {
+          direction = params.direction;
+          amount = params.amount || 300;
+        } else {
+          // Default scroll down
+          direction = 'down';
+          amount = 300;
+        }
+        
+        return {
+          name: 'browser_scroll',
+          args: { direction, amount }
+        };
+      }
+      
+      // Navigation history
+      case 'historyback':
+      case 'goback':
+      case 'back':
+        return {
+          name: 'browser_navigate_back',
+          args: {}
+        };
+      
+      case 'historyforward':
+      case 'goforward':
+      case 'forward':
+        return {
+          name: 'browser_navigate_forward',
+          args: {}
+        };
+      
+      case 'refresh':
+      case 'reload':
+        return {
+          name: 'browser_navigate',
+          args: { url: '' }  // Refresh current page
+        };
+      
+      // Wait/pause actions
+      case 'wait':
+      case 'pause':
+      case 'sleep':
+      case 'delay':
+        return {
+          name: '_wait',
+          args: { time: params.time || params.seconds || params.duration || 1 }
+        };
+      
+      // Completion actions
+      case 'terminate':
+      case 'stopaction':
+      case 'stop':
+      case 'done':
+      case 'finish':
+      case 'complete':
+      case 'answer':
+        return {
+          name: '_terminate',
+          args: { 
+            status: params.status || 'success',
+            answer: params.answer || params.response || params.message || ''
+          }
+        };
+      
+      // Memory actions
+      case 'pauseandmemorizefact':
+      case 'memorize':
+      case 'remember':
+      case 'note':
+        return {
+          name: '_memorize',
+          args: { fact: params.fact || params.text || params.note }
+        };
+      
+      // Screenshot (handled specially but including for completeness)
+      case 'screenshot':
+      case 'takescreenshot':
+      case 'capture':
+        return {
+          name: 'browser_take_screenshot',
+          args: {}
+        };
+      
+      default:
+        logger.warn(`[Fara] Unknown action type: ${actionType}`);
+        return null;
+    }
+  }
+
+  /**
+   * Process a message using Microsoft's Fara model via OpenAI-compatible API
+   * @param {string} userMessage - The user's message
+   * @returns {Promise<string>} The response text
+   */
+  async processMessageFara(userMessage) {
+    try {
+      console.log('Processing message with Fara:', userMessage);
+      
+      // Get screenshot for the message
+      const screenshotData = this.screenshotService?.getLastScreenshot();
+      
+      // Build system prompt with current date
+      const systemPrompt = this.getFaraSystemPrompt()
+        .replace('{DATE_TODAY}', new Date().toLocaleDateString());
+      
+      // Initialize or use existing conversation history for Fara
+      if (!this._faraHistory) {
+        this._faraHistory = [];
+      }
+      
+      // Build the current message with screenshot
+      const currentMessage = {
+        role: 'user',
+        content: []
+      };
+      
+      // Add screenshot if available (Fara is a vision model)
+      if (screenshotData?.scaled) {
+        currentMessage.content.push({
+          type: 'image_url',
+          image_url: {
+            url: `data:image/png;base64,${screenshotData.scaled}`
+          }
+        });
+      }
+      
+      // Get current page snapshot for element refs
+      let pageSnapshot = '';
+      try {
+        const snapshotResult = await this.mcpService.callTool('browser_snapshot', {});
+        if (snapshotResult?.content?.[0]?.text) {
+          const snapshotText = snapshotResult.content[0].text;
+          const snapshotMatch = snapshotText.match(/```yaml\n([\s\S]*?)```/);
+          if (snapshotMatch) {
+            pageSnapshot = snapshotMatch[1];
+          }
+        }
+      } catch (err) {
+        logger.debug('[Fara] Could not get page snapshot:', err.message);
+      }
+      
+      // Add the text message with structured format (magentic-ui style)
+      let messageText = `## User Request\n\n${userMessage}\n`;
+      
+      // Add memorized facts if any
+      if (this._faraFacts && this._faraFacts.length > 0) {
+        messageText += `\n## Memorized Facts\n\n${this._faraFacts.map(f => `- ${f}`).join('\n')}\n`;
+      }
+      
+      // Add page snapshot for element refs
+      if (pageSnapshot) {
+        messageText += `\n## Page Snapshot\n\nUse [ref=...] values from this snapshot with left_click and type actions:\n\`\`\`yaml\n${pageSnapshot}\`\`\``;
+      }
+      
+      currentMessage.content.push({
+        type: 'text',
+        text: messageText
+      });
+      
+      // Build messages array for API call
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        ...this._faraHistory,
+        currentMessage
+      ];
+      
+      // Store memorized facts
+      if (!this._faraFacts) {
+        this._faraFacts = [];
+      }
+      
+      let textContent = '';
+      let iterations = 0;
+      const maxIterations = 20; // Safety limit
+      let consecutiveErrors = 0;
+      const maxConsecutiveErrors = 3; // Break loop after 3 consecutive errors
+      
+      while (iterations < maxIterations) {
+        iterations++;
+        
+        // Check for consecutive error limit
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          logger.error(`[Fara] Breaking loop after ${maxConsecutiveErrors} consecutive errors`);
+          throw new Error(`Action failed after ${maxConsecutiveErrors} consecutive attempts. The browser tool may be having issues. Please try a different approach.`);
+        }
+        
+        // Check for cancellation
+        if (this.cancelRequested) {
+          logger.info('[Fara] Execution cancelled by user');
+          this.cancelRequested = false;
+          throw new Error('Execution cancelled by user');
+        }
+        
+        logger.info(`[Fara] Iteration ${iterations}, sending request to ${this.faraBaseUrl}`);
+        
+        // Call the OpenAI-compatible API
+        const response = await fetch(`${this.faraBaseUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'fara', // Model name (llama.cpp will ignore this)
+            messages: messages,
+            max_tokens: 4096,
+            temperature: 0.1
+          })
+        });
+        
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Fara API error: ${response.status} - ${errorText}`);
+        }
+        
+        const data = await response.json();
+        const assistantMessage = data.choices?.[0]?.message?.content || '';
+        
+        logger.debug('[Fara] Response:', assistantMessage);
+        
+        // Parse tool call from response
+        const toolCall = this.parseFaraToolCall(assistantMessage);
+        
+        if (!toolCall) {
+          // No tool call - this is a text response
+          textContent = assistantMessage;
+          
+          // Add to history
+          messages.push({ role: 'assistant', content: assistantMessage });
+          this._faraHistory.push(currentMessage);
+          this._faraHistory.push({ role: 'assistant', content: assistantMessage });
+          
+          // Keep history manageable
+          if (this._faraHistory.length > 20) {
+            this._faraHistory = this._faraHistory.slice(-20);
+          }
+          
+          break;
+        }
+        
+        // We have a tool call
+        logger.info(`[Fara] Tool call: ${toolCall.name}`, toolCall.arguments);
+        
+        // Add assistant's response to messages
+        messages.push({ role: 'assistant', content: assistantMessage });
+        
+        // Handle 'goto' as a navigation shortcut
+        if (toolCall.name === 'goto' && toolCall.arguments?.url) {
+          toolCall.name = 'computer_use';
+          toolCall.arguments = { action: 'visit_url', url: toolCall.arguments.url };
+        }
+        
+        // Handle 'stop_action' as a direct tool call (Fara's native stop)
+        if (toolCall.name === 'stop_action') {
+          textContent = toolCall.arguments?.answer || 'Task completed.';
+          break;
+        }
+        
+        // Check if it's computer_use (Fara's main tool)
+        if (toolCall.name === 'computer_use') {
+          let action = toolCall.arguments;
+          
+          // Handle missing action field - infer from arguments
+          if (!action.action && action.url) {
+            action = { action: 'visit_url', url: action.url };
+          }
+          
+          const mcpMapping = this.mapFaraActionToMCP(action);
+          
+          if (!mcpMapping) {
+            // Unknown action - track as error to prevent infinite loops
+            consecutiveErrors++;
+            logger.warn(`[Fara] Unknown action '${action.action}', consecutive errors: ${consecutiveErrors}/${maxConsecutiveErrors}`);
+            
+            // Include screenshot for context
+            const invalidActionScreenshot = this.screenshotService?.getLastScreenshot();
+            const invalidObservation = {
+              role: 'user',
+              content: []
+            };
+            
+            if (invalidActionScreenshot?.scaled) {
+              invalidObservation.content.push({
+                type: 'image_url',
+                image_url: { url: `data:image/png;base64,${invalidActionScreenshot.scaled}` }
+              });
+            }
+            
+            invalidObservation.content.push({
+              type: 'text',
+              text: `## Observation\n\n**Status:** FAILED\n**Action:** ${action.action}\n**Error:** Unknown action type\n\n**Valid Actions:**\n- visit_url: Navigate to URL\n- web_search: Google search\n- left_click: Click element (use ref or coordinate)\n- type: Type text (use ref)\n- scroll: Scroll page\n- key: Press keyboard key\n- wait: Wait for content\n- stop_action: Complete task with answer\n\n**Guidance:** Use one of the valid actions above.`
+            });
+            
+            messages.push(invalidObservation);
+            continue;
+          }
+          
+          // Handle special internal actions
+          if (mcpMapping.name === '_terminate') {
+            // Use answer from stop_action if provided, otherwise generic message
+            textContent = mcpMapping.args.answer || `Task ${mcpMapping.args.status}. Done.`;
+            break;
+          }
+          
+          if (mcpMapping.name === '_wait') {
+            const waitTime = mcpMapping.args.time * 1000;
+            logger.info(`[Fara] Waiting ${waitTime}ms`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            
+            // Take new screenshot after wait
+            const newScreenshot = this.screenshotService ? this.screenshotService.getLastScreenshot() : null;
+            const observation = {
+              role: 'user',
+              content: []
+            };
+            if (newScreenshot?.scaled) {
+              observation.content.push({
+                type: 'image_url',
+                image_url: { url: `data:image/png;base64,${newScreenshot.scaled}` }
+              });
+            }
+            observation.content.push({
+              type: 'text',
+              text: `## Observation\n\n**Status:** SUCCESS\n**Action:** wait\n**Duration:** ${mcpMapping.args.time} seconds\n\nThe page may have updated. Analyze the screenshot and continue with the task.`
+            });
+            messages.push(observation);
+            consecutiveErrors = 0; // Reset on successful wait
+            continue;
+          }
+          
+          if (mcpMapping.name === '_memorize') {
+            this._faraFacts.push(mcpMapping.args.fact);
+            
+            // Include screenshot for visual context
+            const memorizeScreenshot = this.screenshotService?.getLastScreenshot();
+            const memorizeObservation = {
+              role: 'user',
+              content: []
+            };
+            
+            if (memorizeScreenshot?.scaled) {
+              memorizeObservation.content.push({
+                type: 'image_url',
+                image_url: { url: `data:image/png;base64,${memorizeScreenshot.scaled}` }
+              });
+            }
+            
+            memorizeObservation.content.push({
+              type: 'text',
+              text: `## Observation\n\n**Status:** SUCCESS\n**Action:** memorize\n**Fact stored:** "${mcpMapping.args.fact}"\n\nThis fact will be included in future observations. Continue with the task.`
+            });
+            
+            messages.push(memorizeObservation);
+            consecutiveErrors = 0; // Reset on successful memorize
+            continue;
+          }
+          
+          // Handle type with coordinate (click first, then type)
+          if (mcpMapping.name === '_type_with_click') {
+            const toolId = this.generateToolId();
+            const startTime = Date.now();
+            
+            this.emitToolEvent('tool-execution-start', {
+              toolId,
+              toolName: 'type_with_click',
+              args: mcpMapping.args
+            });
+            
+            try {
+              const { x, y, text, pressEnter, clearFirst, element } = mcpMapping.args;
+              
+              // Set click indicator for visual feedback
+              if (this.screenshotService) {
+                this.screenshotService.setClickIndicator(x, y);
+              }
+              
+              // First click the field
+              await this.mcpService.callTool('browser_mouse_click_xy', {
+                x, y, element: `click to focus ${element}`
+              });
+              
+              // Wait for focus
+              await new Promise(resolve => setTimeout(resolve, 300));
+              
+              // Clear existing text if requested
+              if (clearFirst) {
+                await this.mcpService.callTool('browser_press_key', { key: 'Control+a' });
+                await new Promise(resolve => setTimeout(resolve, 100));
+                await this.mcpService.callTool('browser_press_key', { key: 'Backspace' });
+                await new Promise(resolve => setTimeout(resolve, 100));
+              }
+              
+              // Type the text using browser_run_code with page.keyboard.type()
+              // This properly types text character by character like a real user
+              const typeCode = `await page.keyboard.type(${JSON.stringify(text)}, { delay: 50 });`;
+              await this.mcpService.callTool('browser_run_code', { code: typeCode });
+              
+              // Press Enter if requested
+              if (pressEnter) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                await this.mcpService.callTool('browser_press_key', { key: 'Enter' });
+              }
+              
+              const duration = Date.now() - startTime;
+              this.emitToolEvent('tool-execution-success', {
+                toolId,
+                toolName: 'type_with_click',
+                duration,
+                visualChange: true
+              });
+              
+              // Log action
+              this.actionLog.push({
+                timestamp: new Date().toISOString(),
+                toolName: 'type_with_click',
+                args: mcpMapping.args,
+                success: true
+              });
+              
+              // Wait for typing to take effect
+              await new Promise(resolve => setTimeout(resolve, 500));
+              
+              // Build observation
+              const typeScreenshot = this.screenshotService?.getLastScreenshot();
+              const typeObservation = {
+                role: 'user',
+                content: []
+              };
+              
+              if (typeScreenshot?.scaled) {
+                typeObservation.content.push({
+                  type: 'image_url',
+                  image_url: { url: `data:image/png;base64,${typeScreenshot.scaled}` }
+                });
+              }
+              
+              typeObservation.content.push({
+                type: 'text',
+                text: `## Observation\n\n**Status:** SUCCESS\n**Action:** type\n**Text typed:** "${text}"\n**Location:** (${x}, ${y})\n\nText has been entered. Check the screenshot to verify.`
+              });
+              
+              messages.push(typeObservation);
+              consecutiveErrors = 0;
+              continue;
+              
+            } catch (error) {
+              logger.error('[Fara] type_with_click error:', error);
+              consecutiveErrors++;
+              
+              this.emitToolEvent('tool-execution-error', {
+                toolId,
+                toolName: 'type_with_click',
+                error: error.message
+              });
+              
+              const errorScreenshot = this.screenshotService?.getLastScreenshot();
+              const errorObservation = {
+                role: 'user',
+                content: []
+              };
+              
+              if (errorScreenshot?.scaled) {
+                errorObservation.content.push({
+                  type: 'image_url',
+                  image_url: { url: `data:image/png;base64,${errorScreenshot.scaled}` }
+                });
+              }
+              
+              errorObservation.content.push({
+                type: 'text',
+                text: `## Observation\n\n**Status:** ERROR\n**Action:** type\n**Error:** ${error.message}\n\n**Guidance:** Try using left_click to focus the field first, then use type with ref.`
+              });
+              
+              messages.push(errorObservation);
+              continue;
+            }
+          }
+          
+          // Execute the MCP tool
+          const toolId = this.generateToolId();
+          const startTime = Date.now();
+          
+          // Emit tool execution start
+          this.emitToolEvent('tool-execution-start', {
+            toolId,
+            toolName: mcpMapping.name,
+            args: mcpMapping.args
+          });
+          
+          try {
+            // Special handling for coordinate clicks - set visual indicator
+            if (mcpMapping.name === 'browser_mouse_click_xy' && this.screenshotService) {
+              const { x, y } = mcpMapping.args;
+              if (x !== undefined && y !== undefined) {
+                logger.info(`[Fara Click Indicator] Setting at (${x}, ${y})`);
+                this.screenshotService.setClickIndicator(x, y);
+              }
+            }
+            
+            // Capture before screenshot for visual change detection
+            const beforeScreenshot = this.screenshotService?.getLastScreenshot()?.full;
+            
+            // Execute the tool
+            const toolResult = await this.mcpService.callTool(mcpMapping.name, mcpMapping.args);
+            
+            // Log action
+            this.actionLog.push({
+              timestamp: new Date().toISOString(),
+              toolName: mcpMapping.name,
+              args: mcpMapping.args,
+              success: !toolResult.isError
+            });
+            
+            // Wait for visual changes
+            const waitTime = mcpMapping.name === 'browser_navigate' ? 1500 : 
+                            mcpMapping.name === 'browser_mouse_click_xy' ? 800 : 500;
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            
+            // Get new screenshot
+            const afterScreenshotData = this.screenshotService?.getLastScreenshot();
+            const afterScreenshot = afterScreenshotData?.full;
+            
+            // Detect visual changes
+            let visualChangeText = '';
+            if (beforeScreenshot && afterScreenshot) {
+              const comparison = await this.compareScreenshots(beforeScreenshot, afterScreenshot, mcpMapping.name);
+              if (comparison.changed) {
+                visualChangeText = `Visual change detected (${comparison.percentDiff}% pixels changed).`;
+              } else {
+                visualChangeText = `WARNING: No visual change detected. The action may have failed.`;
+              }
+            }
+            
+            // Emit success
+            const duration = Date.now() - startTime;
+            this.emitToolEvent('tool-execution-success', {
+              toolId,
+              toolName: mcpMapping.name,
+              duration,
+              visualChange: visualChangeText.includes('Visual change detected'),
+              changePercent: visualChangeText.match(/(\d+\.?\d*)%/)?.[1]
+            });
+            
+            // Build observation for Fara - screenshots + page snapshot for element refs
+            const observation = {
+              role: 'user',
+              content: []
+            };
+            
+            // Add screenshot first - Fara is a vision model
+            if (afterScreenshotData?.scaled) {
+              observation.content.push({
+                type: 'image_url',
+                image_url: { url: `data:image/png;base64,${afterScreenshotData.scaled}` }
+              });
+            }
+            
+            // Build structured observation text (magentic-ui style)
+            let resultText = '';
+            
+            // Status section
+            if (toolResult.isError && toolResult.content?.[0]?.text) {
+              resultText = `## Observation\n\n**Status:** FAILED\n**Action:** ${action.action}\n**Error:** ${toolResult.content[0].text.substring(0, 300)}\n`;
+              consecutiveErrors++;
+              logger.warn(`[Fara] Tool error, consecutive errors: ${consecutiveErrors}/${maxConsecutiveErrors}`);
+            } else {
+              resultText = `## Observation\n\n**Status:** SUCCESS\n**Action:** ${action.action}\n`;
+              consecutiveErrors = 0;
+            }
+            
+            // Visual feedback section
+            resultText += `\n**Visual Feedback:** ${visualChangeText}\n`;
+            
+            // Page snapshot section for element refs
+            const toolResultText = toolResult.content?.[0]?.text || '';
+            const snapshotMatch = toolResultText.match(/- Page Snapshot:\n```yaml\n([\s\S]*?)```/);
+            if (snapshotMatch) {
+              resultText += `\n**Page Snapshot** (use [ref=...] values for interactions):\n\`\`\`yaml\n${snapshotMatch[1]}\`\`\`\n`;
+            }
+            
+            // Guidance section
+            if (toolResult.isError) {
+              resultText += `\n**Guidance:** The action failed. Analyze the screenshot and try an alternative approach. Consider:\n- Using a different element ref\n- Scrolling to reveal the target\n- Waiting for page to load\n- Clicking to focus before typing\n`;
+            } else if (!visualChangeText.includes('Visual change detected')) {
+              resultText += `\n**Guidance:** No visual change detected. The action may not have had the expected effect. Consider:\n- Verifying the element was correct\n- Trying a different interaction method\n- Checking if the page needs to load\n`;
+            }
+            
+            observation.content.push({
+              type: 'text',
+              text: resultText
+            });
+            
+            messages.push(observation);
+            
+          } catch (error) {
+            logger.error(`[Fara] Tool execution error:`, error);
+            consecutiveErrors++; // Track consecutive errors
+            logger.warn(`[Fara] Exception error, consecutive errors: ${consecutiveErrors}/${maxConsecutiveErrors}`);
+            
+            // Emit error event
+            this.emitToolEvent('tool-execution-error', {
+              toolId,
+              toolName: mcpMapping.name,
+              error: error.message
+            });
+            
+            // Add error observation with screenshot (Fara needs visual context)
+            const errorScreenshot = this.screenshotService?.getLastScreenshot();
+            const errorObservation = {
+              role: 'user',
+              content: []
+            };
+            
+            // Include screenshot even on error - Fara relies on visual feedback
+            if (errorScreenshot?.scaled) {
+              errorObservation.content.push({
+                type: 'image_url',
+                image_url: { url: `data:image/png;base64,${errorScreenshot.scaled}` }
+              });
+            }
+            
+            errorObservation.content.push({
+              type: 'text',
+              text: `## Observation\n\n**Status:** ERROR\n**Action:** ${action.action}\n**Error:** ${error.message.substring(0, 300)}\n\n**Guidance:** The action encountered an error. Analyze the screenshot and try an alternative approach. Consider:\n- Using a different element or ref\n- Checking if the page has fully loaded\n- Trying a different action type\n`
+            });
+            
+            messages.push(errorObservation);
+          }
+        } else {
+          // Unknown tool name from Fara - include screenshot for context
+          const unknownToolScreenshot = this.screenshotService?.getLastScreenshot();
+          const unknownObservation = {
+            role: 'user',
+            content: []
+          };
+          
+          if (unknownToolScreenshot?.scaled) {
+            unknownObservation.content.push({
+              type: 'image_url',
+              image_url: { url: `data:image/png;base64,${unknownToolScreenshot.scaled}` }
+            });
+          }
+          
+          unknownObservation.content.push({
+            type: 'text',
+            text: `## Observation\n\n**Status:** FAILED\n**Error:** Unknown tool "${toolCall.name}"\n\n**Guidance:** Please use the computer_use tool with valid actions:\n- visit_url, web_search, left_click, type, scroll, key, wait, stop_action\n\nExample: {"name": "computer_use", "arguments": {"action": "visit_url", "url": "https://google.com"}}`
+          });
+          
+          messages.push(unknownObservation);
+        }
+      }
+      
+      if (iterations >= maxIterations) {
+        logger.warn('[Fara] Max iterations reached');
+        textContent = 'I have reached the maximum number of steps. Please try breaking down the task into smaller parts.';
+      }
+      
+      // Update conversation history - STRIP IMAGES to prevent context overflow
+      // Images are huge (base64) and accumulate quickly, exceeding context limit
+      // Only keep text content in history; fresh screenshot is added with each new request
+      this._faraHistory = messages.slice(1)
+        .filter(m => m.role !== 'system')
+        .map(m => {
+          // Strip image_url content from history to save context space
+          if (Array.isArray(m.content)) {
+            return {
+              role: m.role,
+              content: m.content
+                .filter(c => c.type !== 'image_url')
+                .map(c => c.type === 'text' ? c : { type: 'text', text: '[image]' })
+            };
+          }
+          return m;
+        })
+        .filter(m => {
+          // Remove empty messages (had only images)
+          if (Array.isArray(m.content)) {
+            return m.content.length > 0 && m.content.some(c => c.text && c.text !== '[image]');
+          }
+          return true;
+        });
+      
+      // Keep only last 10 exchanges to stay within context limits
+      if (this._faraHistory.length > 10) {
+        this._faraHistory = this._faraHistory.slice(-10);
+      }
+      
+      return textContent || 'Done.';
+      
+    } catch (error) {
+      console.error('Error processing message with Fara:', error);
+      
+      if (error.message?.includes('ECONNREFUSED') || error.message?.includes('fetch failed')) {
+        const connectionError = new Error(`Cannot connect to Fara server at ${this.faraBaseUrl}. Make sure llama.cpp server is running.`);
+        connectionError.status = 503;
+        connectionError.statusText = 'Service Unavailable';
+        throw connectionError;
+      }
+      
+      // Check for context size exceeded error
+      if (error.message?.includes('context size') || error.message?.includes('exceed_context_size')) {
+        // Clear history and suggest retry
+        this._faraHistory = [];
+        const contextError = new Error(
+          `Context size exceeded. History has been cleared. Please try your request again.`
+        );
+        contextError.status = 400;
+        contextError.statusText = 'Context Size Exceeded';
+        throw contextError;
+      }
+      
+      // Check for mmproj error - vision model not properly configured
+      if (error.message?.includes('mmproj') || error.message?.includes('image input is not supported')) {
+        const visionError = new Error(
+          `Fara vision model not properly configured. The llama.cpp server needs the multimodal projector (mmproj) file.\n\n` +
+          `Start llama.cpp with:\n` +
+          `llama-server -m Fara-7B.gguf --mmproj Fara-7B-mmproj.gguf --port 8080\n\n` +
+          `Download both the model and mmproj files from Hugging Face.`
+        );
+        visionError.status = 500;
+        visionError.statusText = 'Vision Model Not Configured';
+        throw visionError;
+      }
+      
       throw error;
     }
   }
@@ -1216,6 +2329,13 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
 
   clearHistory() {
     this.conversationHistory = [];
+    // Also clear Fara-specific history if it exists
+    if (this._faraHistory) {
+      this._faraHistory = [];
+    }
+    if (this._faraFacts) {
+      this._faraFacts = [];
+    }
   }
 
   getActionLog() {
@@ -1239,8 +2359,13 @@ Your goal is to complete the user's request using the most appropriate tool. Fol
    * @returns {Promise<string>} - The generated Playwright test script
    */
   async generatePlaywrightScript() {
-    if (this.provider !== 'gemini') {
-      throw new Error('Playwright script generation is only supported with Gemini provider');
+    if (this.provider !== 'gemini' && this.provider !== 'fara') {
+      throw new Error('Playwright script generation is only supported with Gemini or Fara providers');
+    }
+    
+    // Fara is a vision/automation model, use Gemini-style prompt parsing for script generation
+    if (this.provider === 'fara') {
+      throw new Error('Playwright script generation with Fara is not yet implemented. Please use Gemini provider for script generation.');
     }
 
     if (this.actionLog.length === 0) {
