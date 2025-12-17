@@ -111,7 +111,6 @@ function setupEventListeners() {
     
     // Listen for screenshot updates
     window.electronAPI.onScreenshotUpdate((screenshot) => {
-        // Note: Removed verbose logging - runs at 15 FPS
         updateScreenshot(screenshot);
         updateFPS();
         updateStreamStatus('live');
