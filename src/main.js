@@ -44,12 +44,43 @@ app.whenReady().then(async () => {
   // Parse command line arguments
   const args = process.argv.slice(1); // Skip electron executable
   let playbookPath = null;
+  let zoomPercent = null;
   
   // Look for -p flag
   const pIndex = args.indexOf('-p');
   if (pIndex !== -1 && pIndex + 1 < args.length) {
     playbookPath = args[pIndex + 1];
     console.log(`[Main] Playbook mode: ${playbookPath}`);
+  }
+
+  // Look for -z flag (zoom percent)
+  const zIndex = args.indexOf('-z');
+  if (zIndex !== -1 && zIndex + 1 < args.length) {
+    const rawZoom = args[zIndex + 1];
+    const parsed = Number.parseFloat(rawZoom);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      console.warn(`[Main] Ignoring invalid zoom percent for -z: ${rawZoom}`);
+    } else {
+      zoomPercent = parsed;
+    }
+  }
+
+  // Translate zoom percent to viewport size.
+  // 0% zoom means base viewport (1920x1080).
+  // 400% zoom means 4x zoom => viewport divided by 4.
+  if (zoomPercent !== null && zoomPercent !== 0) {
+    const baseWidth = 1920;
+    const baseHeight = 1080;
+    const zoomFactor = zoomPercent / 100;
+
+    if (zoomFactor > 0) {
+      const width = Math.max(1, Math.round(baseWidth / zoomFactor));
+      const height = Math.max(1, Math.round(baseHeight / zoomFactor));
+      process.env.MCP_VIEWPORT_SIZE = `${width}x${height}`;
+      console.log(`[Main] Zoom: ${zoomPercent}% -> MCP viewport: ${process.env.MCP_VIEWPORT_SIZE}`);
+    } else {
+      console.warn(`[Main] Ignoring zoom percent ${zoomPercent} because it results in invalid zoomFactor ${zoomFactor}`);
+    }
   }
   
   // Start window creation and service initialization in parallel

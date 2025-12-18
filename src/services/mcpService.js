@@ -31,10 +31,11 @@ class MCPService {
       const url = require('url');
       
       const serverPort = process.env.MCP_SERVER_PORT || 3000;
+      const viewportSize = process.env.MCP_VIEWPORT_SIZE || '1920x1080';
       
       // Start the MCP server manually with --port flag
       console.log(`Starting MCP server on port ${serverPort}...`);
-      this.serverProcess = spawn('npx', ['@playwright/mcp@latest', '--browser', 'chrome', '--caps', 'vision', '--isolated', '--viewport-size', '1920x1080', '--headless', '--port', serverPort.toString()], {
+      this.serverProcess = spawn('npx', ['@playwright/mcp@latest', '--browser', 'chrome', '--caps', 'vision', '--isolated', '--viewport-size', viewportSize, '--headless', '--port', serverPort.toString()], {
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe']
       });

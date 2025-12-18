@@ -6,6 +6,7 @@ const downloadScriptButton = document.getElementById('downloadScriptButton');
 const screenshotImage = document.getElementById('screenshotImage');
 const canvasContent = document.getElementById('canvasContent');
 const urlDisplay = document.getElementById('urlDisplay');
+const canvasBrowser = document.querySelector('.canvas-browser');
 const statusDot = document.getElementById('statusDot');
 const statusText = document.getElementById('statusText');
 const fpsCounter = document.getElementById('fpsCounter');
@@ -612,6 +613,9 @@ function updateScreenshot(screenshot) {
         screenshotImage.src = `data:image/png;base64,${screenshot}`;
         // Show screenshot, hide placeholder
         screenshotImage.style.display = 'block';
+        if (canvasBrowser) {
+            canvasBrowser.classList.add('visible');
+        }
         const placeholder = canvasContent.querySelector('.canvas-placeholder');
         if (placeholder) {
             placeholder.style.display = 'none';
@@ -642,6 +646,9 @@ function showPlaceholder() {
     // Hide screenshot, show placeholder
     screenshotImage.style.display = 'none';
     urlDisplay.style.display = 'none';
+    if (canvasBrowser) {
+        canvasBrowser.classList.remove('visible');
+    }
     const placeholder = canvasContent.querySelector('.canvas-placeholder');
     if (placeholder) {
         placeholder.style.display = 'flex';
