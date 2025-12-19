@@ -256,7 +256,7 @@ To use Fara, you need to run the Fara-7B model locally with Llama.cpp:
 
 3. Start the server **with the mmproj file**:
 ```bash
-llama-server -m Fara-7B-Q6_K_L.gguf --mmproj Fara-7B-mmproj-bf16.gguf --port 5001 -c 16384 --temp 0
+llama-server -m microsoft_Fara-7B-Q6_K_L.gguf --mmproj mmproj-microsoft_Fara-7B-bf16.gguf  --port 5001 -c 16384 --temp 0
 ```
    > **Note:** Fara supports up to 128k tokens context. The `-c` flag sets the context size in llama.cpp (default is only 4096). Use `-c 16384` or higher for multi-step automation tasks.
 
